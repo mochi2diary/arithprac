@@ -36,15 +36,14 @@ DIGITS_MULTIPLIER   = 2 # 乗数の桁数
 #   digits    : 桁数
 #   allow_one : 各桁に 1 を許可するか
 #   force_one_at : 指定した位置(0=最上位)を必ず 1 にする(nil で無し)
-# 最上位桁は 0 にしない(桁数を保つ)。
+# いずれの桁にも 0 は入れない(0 が来ると暗算が簡単になりすぎるため)。
 def rand_number(digits, allow_one:, force_one_at: nil)
   ds = Array.new(digits) do |i|
-    top = (i.zero?)
     if force_one_at == i
       1
     else
       loop do
-        d = top ? rand(1..9) : rand(0..9)
+        d = rand(1..9)
         break d if allow_one || d != 1
       end
     end
