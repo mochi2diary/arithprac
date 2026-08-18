@@ -13,7 +13,7 @@
 #            どの回の解答かが分かるよう「第N回」で対応付ける。
 #
 # 使い方:
-#   ruby ankan.rb [-n 問題数] [-s シード]
+#   ruby arithprac.rb [-n 問題数] [-s シード]
 #     -n, --num N  : 1 回あたりの問題数 (2〜26, 既定 20)
 #     -s, --seed S : 乱数シード(再現用)
 
@@ -25,7 +25,7 @@ DEFAULT_PROBLEMS = 20  # 1 回あたりの問題数の既定値
 MIN_PROBLEMS     = 2   # 1 回あたりの問題数の下限
 MAX_PROBLEMS     = 26  # 1 回あたりの問題数の上限
 JP_FONT          = 'BIZ UDGothic'
-BASENAME         = 'ankan'
+BASENAME         = 'arithprac'
 
 # 桁数設定。将来 3 桁×3 桁 まで拡張できるよう桁数で管理する。
 DIGITS_MULTIPLICAND = 2 # 被乗数の桁数
@@ -111,7 +111,7 @@ def build_typst(sets, num)
   ln = left_count(num)
   out = +''
   out << <<~TYP
-    // 自動生成ファイル (ankan.rb) — 直接編集しないでください。
+    // 自動生成ファイル (arithprac.rb) — 直接編集しないでください。
     #set text(font: "#{JP_FONT}", size: 12pt, lang: "ja")
 
     // --- 寸法(将来 3 桁×3 桁 でも数値右揃え・解答欄の位置と大きさをそろえる) ---
@@ -229,7 +229,7 @@ end
 
 options = { num: DEFAULT_PROBLEMS, seed: nil }
 parser = OptionParser.new do |o|
-  o.banner = '使い方: ruby ankan.rb [options]'
+  o.banner = '使い方: ruby arithprac.rb [options]'
   o.on('-n', '--num N', Integer,
        "1 回あたりの問題数 (#{MIN_PROBLEMS}〜#{MAX_PROBLEMS}, 既定 #{DEFAULT_PROBLEMS})") { |v| options[:num] = v }
   o.on('-s', '--seed S', Integer, '乱数シード(再現用)') { |v| options[:seed] = v }
