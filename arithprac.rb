@@ -29,7 +29,7 @@ JP_FONT          = 'BIZ UDGothic'
 BASENAME         = 'arithprac'
 
 # 演算子記号(表示用)
-OP_SYM = { add: '+', mul: '×' }.freeze
+OP_SYM = { add: '+', sub: '−', mul: '×' }.freeze
 
 # スケール(文字・解答欄サイズ)。値は pt / mm(単位はテンプレート側で付与)。
 #   inset_y : 問題行の行間(y)         valfs : 数値・等号のフォント
@@ -70,6 +70,14 @@ def_pattern('P1-1-6', :add) do                            # 2..9 + 2..9, 和 11.
   loop { a = rand(2..9); b = rand(2..9); break [a, b] if a + b >= 11 }
 end
 
+# --- 暗算-減算(P1-2-x)---
+def_pattern('P1-2-1', :sub) do                            # 1..10 - 1..10, 差 0..9(a >= b)
+  loop { a = rand(1..10); b = rand(1..10); break [a, b] if a >= b }
+end
+def_pattern('P1-2-2', :sub) do                            # 10..19 - 1..9, 差 1..10
+  loop { a = rand(10..19); b = rand(1..9); break [a, b] if a - b <= 10 }
+end
+
 # --- 暗算-乗算(P1-3-x)---
 def_pattern('P1-3-1', :mul) { [rand(2..9), rand(2..9)] }
 def_pattern('P1-3-2', :mul) { [rand(11..99), rand(2..9)] }
@@ -98,19 +106,36 @@ def_pattern('P1-3-6', :mul) do
   end
 end
 
+# ---- 制約(コスト関数)---------------------------------------------------
+# 1 回内で「総コストを上限以下に保つ」ための各問コスト関数。
+# adjust! がコストの正の問題を差し替えて総コストを調整する(下記参照)。
+COST_ONES     = ->(p) { ones_in(p) }              # 被演算数(a,b)に現れる '1' の個数
+COST_B_ONES   = ->(p) { p[:b].to_s.count('1') }   # 減数(b)に現れる '1' の個数
+COST_ZERO_ANS = ->(p) { p[:ans].zero? ? 1 : 0 }   # 答えが 0 なら 1
+COST_ZERO_TEN_ANS = ->(p) { [0, 10].include?(p[:ans]) ? 1 : 0 } # 答えが 0 または 10 なら 1
+COST_A_TEN    = ->(p) { p[:a] == 10 ? 1 : 0 }     # 被減数(a)が 10 なら 1
+
 # ---- ステージ定義 ------------------------------------------------------
 # entries: [[パターン候補配列, 問題数], ...]。候補が複数なら等確率で 1 つ選ぶ。
+# constraints: [[コスト関数, 上限], ...]。1 回内で総コストを上限以下に調整する。
 # special: :kuku のステージは問題数・並び順・回数が固定(CLI 指定を無視)。
 STAGES = {
-  'S1-1-1' => { subtitle: 'たしざん暗算1', scale: :large, max_ones: 2, entries: [[%w[P1-1-1], 10]] },
-  'S1-1-2' => { subtitle: 'たしざん暗算2', scale: :large, max_ones: 1,
+  'S1-1-1' => { subtitle: 'たしざん暗算1', scale: :large, constraints: [[COST_ONES, 2]],
+                entries: [[%w[P1-1-1], 10]] },
+  'S1-1-2' => { subtitle: 'たしざん暗算2', scale: :large, constraints: [[COST_ONES, 1]],
                 entries: [[%w[P1-1-1], 2], [%w[P1-1-2], 2], [%w[P1-1-3], 6]] },
-  'S1-1-3' => { subtitle: 'たしざん暗算3', scale: :large, max_ones: 1,
+  'S1-1-3' => { subtitle: 'たしざん暗算3', scale: :large, constraints: [[COST_ONES, 1]],
                 entries: [[%w[P1-1-1 P1-1-2 P1-1-3], 2], [%w[P1-1-4], 8]] },
   'S1-1-4' => { subtitle: 'たしざん暗算4', scale: :large,
                 entries: [[%w[P1-1-1 P1-1-2 P1-1-3], 2], [%w[P1-1-4], 3], [%w[P1-1-5], 5]] },
   'S1-1-5' => { subtitle: 'たしざん暗算5', scale: :large,
                 entries: [[%w[P1-1-3], 2], [%w[P1-1-6], 8]] },
+  'S1-2-1' => { subtitle: 'ひきざん暗算1', scale: :large,
+                constraints: [[COST_B_ONES, 1], [COST_A_TEN, 2], [COST_ZERO_ANS, 1]],
+                entries: [[%w[P1-2-1], 10]] },
+  'S1-2-2' => { subtitle: 'ひきざん暗算2', scale: :large,
+                constraints: [[COST_B_ONES, 1], [COST_ZERO_TEN_ANS, 1]],
+                entries: [[%w[P1-2-1], 2], [%w[P1-2-2], 8]] },
   'S1-3-1' => { subtitle: 'かけざん暗算1', scale: :medium, special: :kuku },
   'S1-3-2' => { subtitle: 'かけざん暗算2', scale: :medium, entries: [[%w[P1-3-1], 20]] },
   'S1-3-3' => { subtitle: 'かけざん暗算3', scale: :medium, entries: [[%w[P1-3-2], 20]] },
@@ -135,7 +160,12 @@ def gen_problem(pid)
   pat = PATTERNS[pid.upcase]
   a, b = pat[:gen].call
   op = pat[:op]
-  { a: a, b: b, op: op, ans: (op == :add ? a + b : a * b), pid: pat[:id] }
+  ans = case op
+        when :add then a + b
+        when :sub then a - b
+        when :mul then a * b
+        end
+  { a: a, b: b, op: op, ans: ans, pid: pat[:id] }
 end
 
 # 被演算数(a, b)に含まれる数字 '1' の個数。
@@ -163,11 +193,26 @@ def numbered(probs)
   probs.each_with_index.map { |p, i| p.merge(n: i + 1) }
 end
 
-# 同一パターン(pid)で '1' を含まない問題を、可能な限り重複せず生成する。
-def gen_no_one(pid, seen)
+# 同じ数値が隣り合いにくいよう貪欲に並べ替える(分布は変えず順序のみ調整)。
+# ランダムに崩した並びを起点に、直前の問題と数値(a, b)を共有しない候補を優先して
+# 前から詰める。共有しない候補が無ければ先頭の残りを置く(範囲が狭いと発生しうる)。
+def spread_order(probs)
+  rest = probs.shuffle
+  ordered = [rest.shift]
+  until rest.empty?
+    prev = [ordered.last[:a], ordered.last[:b]]
+    i = rest.index { |p| ([p[:a], p[:b]] & prev).empty? } || 0
+    ordered << rest.delete_at(i)
+  end
+  ordered
+end
+
+# 同一パターン(pid)で全コスト関数が 0 になる問題を、可能な限り重複せず生成する。
+def gen_zero_cost(pid, seen, costs)
+  zero = ->(p) { costs.all? { |c| c.call(p).zero? } }
   UNIQUE_ATTEMPTS.times do
     p = gen_problem(pid)
-    next unless ones_in(p).zero?
+    next unless zero.call(p)
 
     key = [p[:a], p[:b], p[:op]]
     next if seen[key]
@@ -175,26 +220,27 @@ def gen_no_one(pid, seen)
     seen[key] = true
     return p
   end
-  # 重複回避を諦めても '1' 無しは優先する
+  # 重複回避を諦めてもコスト 0 は優先する
   UNIQUE_ATTEMPTS.times do
     p = gen_problem(pid)
-    return p if ones_in(p).zero?
+    return p if zero.call(p)
   end
   gen_problem(pid) # 最終手段
 end
 
-# 1 回内で被演算数に現れる '1' の総数を max_ones 以下に調整する。
-# '1' を含む問題を問題番号(n)の大きい順に、'1' を含まない同一パターン問題へ
-# 差し替える。差し替え後の問題は '1' を含まないので、繰り返すと総数は必ず減る。
-def adjust_ones!(set, max_ones, seen)
+# 1 回内で cost の総和を max 以下に調整する。cost が正の問題を問題番号(n)の
+# 大きい順に、全コスト関数が 0 となる同一パターン問題へ差し替える。差し替え後の
+# 問題は全コストが 0 なので、繰り返すと総和は必ず減り、既に満たした制約も壊さない。
+#   all_costs : ステージの全コスト関数(差し替え先が全制約を満たすようにする)
+def adjust!(set, seen, cost, max, all_costs)
   loop do
-    break if set.sum { |p| ones_in(p) } <= max_ones
+    break if set.sum { |p| cost.call(p) } <= max
 
-    target = set.select { |p| ones_in(p).positive? }.max_by { |p| p[:n] }
+    target = set.select { |p| cost.call(p).positive? }.max_by { |p| p[:n] }
     break unless target
 
     seen.delete([target[:a], target[:b], target[:op]])
-    repl = gen_no_one(target[:pid], seen).merge(n: target[:n])
+    repl = gen_zero_cost(target[:pid], seen, all_costs).merge(n: target[:n])
     set[set.index { |p| p[:n] == target[:n] }] = repl
   end
   set
@@ -213,8 +259,12 @@ def make_stage_set(stage)
     count.times { probs << gen_unique(pats, seen) }
   end
   set = numbered(probs.shuffle)
-  adjust_ones!(set, stage[:max_ones], seen) if stage[:max_ones]
-  set
+  if stage[:constraints]
+    all_costs = stage[:constraints].map { |cost, _max| cost }
+    stage[:constraints].each { |cost, max| adjust!(set, seen, cost, max, all_costs) }
+  end
+  # 制約調整(差し替え)後に、隣接での数値重複が減るよう最終的な並びを整える。
+  numbered(spread_order(set))
 end
 
 # 九九ステージ(S1-3-1)の全回分を生成。並び順固定・シャッフルしない。
@@ -249,7 +299,7 @@ def make_pattern_set(patterns, ratios, num)
   seen = {}
   probs = []
   patterns.each_with_index { |pid, i| counts[i].times { probs << gen_unique([pid], seen) } }
-  numbered(probs.shuffle)
+  numbered(spread_order(probs))
 end
 
 # 丸数字(①..⑳ / ㉑..㉟)を返す。

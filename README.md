@@ -20,8 +20,15 @@
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-1-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-1-1-prev.pdf)
 - 足した答えが両手で数えられる範囲
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-1-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-1-2-prev.pdf)
-- 1..9 + 1..9 = □(2..18)
+- 1桁 + 1桁（繰り上がりあり）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-1-5.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-1-5-prev.pdf)
+
+### ひきざん（暗算）
+
+- 両手の指で数えられる範囲の引き算
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-2-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-2-1-prev.pdf)
+- 結果が10以下の引き算（繰り下がりあり）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-2-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-2-2-prev.pdf)
 
 ### かけざん（暗算）
 
