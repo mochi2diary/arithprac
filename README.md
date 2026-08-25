@@ -37,6 +37,22 @@
 - 2桁 × 2桁 （1は半分だけ出現）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-6.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-6-prev.pdf)
 
+### たしざん（筆算）
+
+試しに作ってはみたものの，4歳児が書き込むには字が小さすぎる気がする（未確認）。
+
+- 2桁 + 1桁 （繰り上がりなし）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-1-prev.pdf)
+- 2桁 + 1桁 （十の位への繰り上がりあり）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-2-prev.pdf)
+- 2桁 + 2桁（十の位への繰り上がりあり，百の位への繰り上がりなし）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-3.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-3-prev.pdf)
+- 最大3桁 + 2桁（十の位への繰り上がりあり，百・千の位への繰り上がりなし）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-4.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-4-prev.pdf)
+- 3桁 + 最大3桁（繰り上がりあり）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-5.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-5-prev.pdf)
+
+
 ## おわりに
 
 Claude にちゃちゃっと書かせただけの簡単なプログラム（と生成物）なので，気に入らない点があればご自身で修正されるか同様のものを新たに作成されるのがよいと思います。
