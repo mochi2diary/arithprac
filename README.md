@@ -47,7 +47,7 @@
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-2-prev.pdf)
 - 2桁 + 2桁（十の位への繰り上がりあり，百の位への繰り上がりなし）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-3.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-3-prev.pdf)
-- 最大3桁 + 2桁（十の位への繰り上がりあり，百・千の位への繰り上がりなし）
+- 最大3桁 + 2桁（十・百の位への繰り上がりあり，千の位への繰り上がりなし）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-4.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-4-prev.pdf)
 - 3桁 + 最大3桁（繰り上がりあり）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-5.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-5-prev.pdf)
