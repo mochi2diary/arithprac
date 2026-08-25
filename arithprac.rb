@@ -208,12 +208,24 @@ COST_A_TENS_ONE = ->(p) { p[:a] / 10 % 10 == 1 ? 1 : 0 }
 COST_A_TENS_ZERO_ONE = ->(p) { [0, 1].include?(p[:a] / 10 % 10) ? 1 : 0 }
 # 被加数・加数の十の位に現れる '0' と '1' の個数(0〜2)
 COST_TENS_ZERO_ONE = ->(p) { [p[:a] / 10 % 10, p[:b] / 10 % 10].count { |d| [0, 1].include?(d) } }
+# 1 問の中で被演算数どうしが似すぎなら 1。同じ桁数で相違する桁が 1 つ以下
+# (649 + 639 や 136 + 136 など)を「似すぎ」とする。桁数が違えば似ていない。
+# 1 桁どうしは必ず相違 1 桁以下になるため、2 桁以上のみを対象とする。
+COST_SIMILAR_AB = lambda do |p|
+  sa = p[:a].to_s
+  sb = p[:b].to_s
+  next 0 unless sa.size == sb.size && sa.size >= 2
 
-# 筆算-加算ステージの制約セット。一の位の '0'/'1' は 1 回までで共通。
-# 十の位の条件だけがステージの進行につれて広がる。
-CONSTR_A_TENS_ONE      = [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ONE, 2]].freeze
-CONSTR_A_TENS_ZERO_ONE = [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ZERO_ONE, 2]].freeze
-CONSTR_TENS_ZERO_ONE   = [[COST_UNITS_ZERO_ONE, 1], [COST_TENS_ZERO_ONE, 2]].freeze
+  sa.chars.zip(sb.chars).count { |x, y| x != y } <= 1 ? 1 : 0
+end
+
+# 筆算-加算ステージの制約セット。1 問内で被加数と加数が似すぎるのを禁止(上限 0)
+# するのと、一の位の '0'/'1' は 1 回までが共通。十の位の条件だけがステージの
+# 進行につれて広がる。
+CONSTR_SIMILAR         = [[COST_SIMILAR_AB, 0]].freeze
+CONSTR_A_TENS_ONE      = (CONSTR_SIMILAR + [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ONE, 2]]).freeze
+CONSTR_A_TENS_ZERO_ONE = (CONSTR_SIMILAR + [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ZERO_ONE, 2]]).freeze
+CONSTR_TENS_ZERO_ONE   = (CONSTR_SIMILAR + [[COST_UNITS_ZERO_ONE, 1], [COST_TENS_ZERO_ONE, 2]]).freeze
 
 # ---- ステージ定義 ------------------------------------------------------
 # entries: [[パターン候補配列, 問題数], ...]。候補が複数なら等確率で 1 つ選ぶ。
@@ -251,7 +263,7 @@ STAGES = {
   'S2-1-4' => { subtitle: 'たしざん筆算4', scale: :large, constraints: CONSTR_A_TENS_ZERO_ONE,
                 entries: [[%w[P2-1-4], 1], [%w[P2-1-5], 3], [%w[P2-1-6], 8]] },
   'S2-1-5' => { subtitle: 'たしざん筆算5', scale: :large, constraints: CONSTR_TENS_ZERO_ONE,
-                entries: [[%w[P2-1-7], 2], [%w[P2-1-8], 4], [%w[P2-1-9], 6]] }
+                entries: [[%w[P2-1-7], 1], [%w[P2-1-8], 5], [%w[P2-1-9], 6]] }
 }.freeze
 
 def stage_num(stage)
@@ -290,19 +302,113 @@ def ones_in(prob)
   prob[:a].to_s.count('1') + prob[:b].to_s.count('1')
 end
 
-# 同一の問題(a, b, op が一致)が seen に無いものを生成して返す。
-# pats が複数なら毎回等確率でパターンを選び直す。候補枯渇時は重複を許容。
-#   seen : 同一回内で既出の問題キーを記録するハッシュ(呼び出し側で用意)
-def gen_unique(pats, seen)
-  UNIQUE_ATTEMPTS.times do
-    p = gen_problem(pats.sample)
-    key = [p[:a], p[:b], p[:op]]
-    next if seen[key]
+# ---- 出題履歴(重複回避)------------------------------------------------
+# 「回をまたいだ再出現」を避ける対象とする直近の回数。
+RECENT_SETS = 3
 
-    seen[key] = true
-    return p
+# 重複回避の厳しさ。上の段から順に試し、UNIQUE_ATTEMPTS 回で見つからなければ
+# 1 段緩める。候補が少ないパターンでも必ず 1 問返せるようにするための仕組み。
+#   :strict      直近の回に出た問題・数値も避ける(回内の重複回避も含む)
+#   :recent_key  直近の回に出た問題のみ避ける(数値の再出現は許す)
+#   :in_set_near 回内で同じ問題・同じ数値・1 桁違いの数値を使わない
+#   :in_set      回内で同じ問題・同じ数値を使わない(1 桁違いは許す)
+#   :key         回内で同じ問題を使わない
+#   :any         重複を許容する(最終手段)
+VARIETY_LEVELS = %i[strict recent_key in_set_near in_set key any].freeze
+PLAIN_LEVELS   = %i[key any].freeze
+
+# 出題履歴を作る。
+#   keys   : 回内で既出の問題キー([a, b, op])→ 出現数
+#   values : 回内で既出の被演算数の値 → 出現数
+#   recent : 直近 RECENT_SETS 回分の [問題キー配列, 数値配列](古い順)
+#   variety: 真なら数値の使い回しと直近の回との重複も避ける。候補が数十通り
+#            しかない暗算(1 桁)では成立しないため、筆算のみで真にする。
+def new_history(variety: false)
+  { keys: Hash.new(0), values: Hash.new(0), recent: [], variety: variety }
+end
+
+def prob_key(prob)
+  [prob[:a], prob[:b], prob[:op]]
+end
+
+# 数値の使い回しを見る対象。1 桁の数は候補が 9 通りしかなく、繰り返しても
+# 「似た問題」には見えないため対象外とする。1 問内の a == b も 1 個と数える。
+def prob_values(prob)
+  [prob[:a], prob[:b]].uniq.select { |v| v >= 10 }
+end
+
+# 問題を履歴に記録する(記録した問題をそのまま返す)。
+def record(hist, prob)
+  hist[:keys][prob_key(prob)] += 1
+  prob_values(prob).each { |v| hist[:values][v] += 1 }
+  prob
+end
+
+# 差し替えで取り除く問題の記録を取り消す。
+def unrecord(hist, prob)
+  hist[:keys][prob_key(prob)] -= 1
+  prob_values(prob).each { |v| hist[:values][v] -= 1 }
+end
+
+# 回内の既出の数値に「同じ桁数で相違 1 桁」のものがあるか(例: 175 と 174、
+# 987 と 957)。3 桁以上のみを対象とする。2 桁では相違 1 桁を避けきれない
+# (相互に 2 桁以上異なる 2 桁の数は最大 10 個しかなく、1 回 24 個は不可能)。
+def near_dup?(hist, prob)
+  prob_values(prob).select { |v| v >= 100 }.any? do |v|
+    sv = v.to_s
+    hist[:values].any? do |w, count|
+      next false unless count.positive?
+
+      sw = w.to_s
+      sw.size == sv.size && sw.chars.zip(sv.chars).count { |x, y| x != y } == 1
+    end
   end
-  gen_problem(pats.sample) # 最終手段: 重複を許容
+end
+
+# level の基準で prob が「重複」に当たるか。
+def dup?(hist, prob, level)
+  return false if level == :any
+  return true if hist[:keys][prob_key(prob)].positive?
+  # 1 問内の被演算数どうしの類似(649 + 639 など)。ステージ制約と同じ判定を
+  # 使う。1 問だけで判定できる条件で必ず満たせるため、緩和の対象にしない。
+  return true if hist[:variety] && COST_SIMILAR_AB.call(prob).positive?
+  return false if level == :key
+  return true if prob_values(prob).any? { |v| hist[:values][v].positive? }
+  return false if level == :in_set
+  return true if near_dup?(hist, prob)
+  return false if level == :in_set_near
+  return true if hist[:recent].any? { |keys, _vals| keys.include?(prob_key(prob)) }
+  return false if level == :recent_key
+
+  vals = prob_values(prob)
+  hist[:recent].any? { |_keys, prev| vals.any? { |v| prev.include?(v) } }
+end
+
+# 1 回分が確定したら呼ぶ。回内の記録を「直近の回」へ移して次の回に備える。
+def close_set!(hist)
+  positive = ->(h) { h.select { |_k, c| c.positive? }.keys }
+  hist[:recent] << [positive.call(hist[:keys]), positive.call(hist[:values])]
+  hist[:recent].shift while hist[:recent].size > RECENT_SETS
+  hist[:keys] = Hash.new(0)
+  hist[:values] = Hash.new(0)
+  hist
+end
+
+def dup_levels(hist)
+  hist[:variety] ? VARIETY_LEVELS : PLAIN_LEVELS
+end
+
+# 履歴と重複しない問題を生成して返す。pats が複数なら毎回等確率で選び直す。
+# 厳しい基準から順に試し、見つからなければ 1 段緩める。
+def gen_unique(pats, hist)
+  dup_levels(hist).each do |level|
+    UNIQUE_ATTEMPTS.times do
+      prob = gen_problem(pats.sample)
+      return record(hist, prob) unless dup?(hist, prob, level)
+    end
+  end
+  # 最後の段は :any(無条件で採用)なので、通常ここへは到達しない。
+  record(hist, gen_problem(pats.sample))
 end
 
 # 問題配列に通し番号を付与する。
@@ -325,39 +431,33 @@ def spread_order(probs)
 end
 
 # 同一パターン(pid)で全コスト関数が 0 になる問題を、可能な限り重複せず生成する。
-def gen_zero_cost(pid, seen, costs)
-  zero = ->(p) { costs.all? { |c| c.call(p).zero? } }
-  UNIQUE_ATTEMPTS.times do
-    p = gen_problem(pid)
-    next unless zero.call(p)
+# 重複回避は gen_unique と同じ段階で緩める(コスト 0 の条件は最後まで維持)。
+def gen_zero_cost(pid, hist, costs)
+  zero = ->(prob) { costs.all? { |c| c.call(prob).zero? } }
+  dup_levels(hist).each do |level|
+    UNIQUE_ATTEMPTS.times do
+      prob = gen_problem(pid)
+      next unless zero.call(prob)
 
-    key = [p[:a], p[:b], p[:op]]
-    next if seen[key]
-
-    seen[key] = true
-    return p
+      return record(hist, prob) unless dup?(hist, prob, level)
+    end
   end
-  # 重複回避を諦めてもコスト 0 は優先する
-  UNIQUE_ATTEMPTS.times do
-    p = gen_problem(pid)
-    return p if zero.call(p)
-  end
-  gen_problem(pid) # 最終手段
+  record(hist, gen_problem(pid)) # 最終手段: コスト 0 も諦める
 end
 
 # 1 回内で cost の総和を max 以下に調整する。cost が正の問題を問題番号(n)の
 # 大きい順に、全コスト関数が 0 となる同一パターン問題へ差し替える。差し替え後の
 # 問題は全コストが 0 なので、繰り返すと総和は必ず減り、既に満たした制約も壊さない。
 #   all_costs : ステージの全コスト関数(差し替え先が全制約を満たすようにする)
-def adjust!(set, seen, cost, max, all_costs)
+def adjust!(set, hist, cost, max, all_costs)
   loop do
     break if set.sum { |p| cost.call(p) } <= max
 
     target = set.select { |p| cost.call(p).positive? }.max_by { |p| p[:n] }
     break unless target
 
-    seen.delete([target[:a], target[:b], target[:op]])
-    repl = gen_zero_cost(target[:pid], seen, all_costs).merge(n: target[:n])
+    unrecord(hist, target)
+    repl = gen_zero_cost(target[:pid], hist, all_costs).merge(n: target[:n])
     set[set.index { |p| p[:n] == target[:n] }] = repl
   end
   set
@@ -368,18 +468,18 @@ def left_count(num)
   (num + 1) / 2
 end
 
-# ステージ 1 回分を生成。同一回内で同一の問題は重複しない。
-def make_stage_set(stage)
-  seen = {}
+# ステージ 1 回分を生成。重複回避の範囲は hist(出題履歴)が決める。
+def make_stage_set(stage, hist)
   probs = []
   stage[:entries].each do |pats, count|
-    count.times { probs << gen_unique(pats, seen) }
+    count.times { probs << gen_unique(pats, hist) }
   end
   set = numbered(probs.shuffle)
   if stage[:constraints]
     all_costs = stage[:constraints].map { |cost, _max| cost }
-    stage[:constraints].each { |cost, max| adjust!(set, seen, cost, max, all_costs) }
+    stage[:constraints].each { |cost, max| adjust!(set, hist, cost, max, all_costs) }
   end
+  close_set!(hist)
   # 制約調整(差し替え)後に、隣接での数値重複が減るよう最終的な並びを整える。
   numbered(spread_order(set))
 end
@@ -410,12 +510,12 @@ def allocate_counts(ratios, num)
   alloc
 end
 
-# --pattern/--ratio 指定の 1 回分を生成。同一回内で同一の問題は重複しない。
-def make_pattern_set(patterns, ratios, num)
+# --pattern/--ratio 指定の 1 回分を生成。重複回避の範囲は hist が決める。
+def make_pattern_set(patterns, ratios, num, hist)
   counts = allocate_counts(ratios, num)
-  seen = {}
   probs = []
-  patterns.each_with_index { |pid, i| counts[i].times { probs << gen_unique([pid], seen) } }
+  patterns.each_with_index { |pid, i| counts[i].times { probs << gen_unique([pid], hist) } }
+  close_set!(hist)
   numbered(spread_order(probs))
 end
 
@@ -778,7 +878,9 @@ if options[:stage]
       abort "内部エラー: ステージ #{key} の問題数(#{num})はリージョンに分割できません" \
             "(#{REGION_SHAPES.keys.join(' / ')})。"
     end
-    sets = Array.new(sets_count) { make_stage_set(stage) }
+    # 履歴は全回で共有する(回をまたいだ重複回避のため)。
+hist = new_history(variety: form == :column)
+sets = Array.new(sets_count) { make_stage_set(stage, hist) }
     puts "ステージ #{key}(#{stage[:subtitle]}): #{pages} ページ・#{sets_count} 回・1 回 #{num} 問" \
          "(form=#{form}, scale=#{scale})。"
   end
@@ -817,7 +919,8 @@ elsif !options[:patterns].empty?
   end
 
   scale = scale_opt || DEFAULT_SCALE
-  sets = Array.new(sets_count) { make_pattern_set(patterns, ratios, num) }
+  hist = new_history(variety: form == :column)
+sets = Array.new(sets_count) { make_pattern_set(patterns, ratios, num, hist) }
   puts "パターン #{patterns.join(', ')}: #{sets_count} 回・1 回 #{num} 問(form=#{form}, scale=#{scale})。"
 
 else
