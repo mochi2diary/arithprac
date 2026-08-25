@@ -41,9 +41,10 @@ REGION_SHAPES = { 12 => [4, 3], 8 => [4, 2], 6 => [3, 2], 4 => [2, 2], 1 => [1, 
 
 # ページ下端のタグ(シード下位 16bit の 16 進 4 文字)。印刷後に問題と解答を対応づける。
 # 問題(A4 横)は切り離した A5 の左下それぞれに、解答(A4 縦)は左下 1 箇所に入れる。
-TAG_MARGIN = 5      # 用紙の左端・下端からの距離(mm)。プリンタの印字限界に近い位置。
+TAG_MARGIN_X = 5    # 用紙の左端からの距離(mm)。本文マージン(6mm)のすぐ外側。
+TAG_MARGIN_Y = 8    # 用紙の下端からの距離(mm)。下端は不可印字領域が広い機種があるため広めにとる。
 TAG_FS     = 6      # タグの文字サイズ(pt)
-TAG_LUMA   = 120    # タグの文字色(luma。小さいほど濃い)
+TAG_LUMA   = 80     # タグの文字色(luma。小さいほど濃い)
 A5_WIDTH   = 148.5  # A4 横を 2 分割した A5 1 枚の幅(mm)
 
 # 見出し(回・名前・得点)と問題本体の間の空き(pt)。出題形式ごとに異なる。
@@ -57,9 +58,9 @@ OP_SYM_ZEN = { add: '＋', sub: '－', mul: '×' }.freeze
 #   inset_y : 問題行の行間(y)         valfs : 数値・等号のフォント
 #   opfs    : 演算子(+/×)のフォント   boxw/boxh : 解答欄の幅・高さ
 SCALES = {
-  small:  { inset_y: 6,  valfs: 13, opfs: 12, boxw: 24, boxh: 8 },
-  medium: { inset_y: 9,  valfs: 14, opfs: 13, boxw: 28, boxh: 12 },
-  large:  { inset_y: 12, valfs: 16, opfs: 15, boxw: 28, boxh: 16 }
+  small:  { inset_y: 10, valfs: 13, opfs: 12, boxw: 26, boxh: 9 },
+  medium: { inset_y: 11, valfs: 14, opfs: 13, boxw: 26, boxh: 12 },
+  large:  { inset_y: 20, valfs: 16, opfs: 15, boxw: 26, boxh: 18 }
 }.freeze
 DEFAULT_SCALE = :small
 
@@ -249,8 +250,8 @@ STAGES = {
                 constraints: [[COST_B_ONES, 1], [COST_ZERO_TEN_ANS, 1]],
                 entries: [[%w[P1-2-1], 2], [%w[P1-2-2], 8]] },
   'S1-3-1' => { subtitle: 'かけざん暗算1', scale: :medium, special: :kuku },
-  'S1-3-2' => { subtitle: 'かけざん暗算2', scale: :medium, entries: [[%w[P1-3-1], 20]] },
-  'S1-3-3' => { subtitle: 'かけざん暗算3', scale: :medium, entries: [[%w[P1-3-2], 20]] },
+  'S1-3-2' => { subtitle: 'かけざん暗算2', scale: :medium, entries: [[%w[P1-3-1], 16]] },
+  'S1-3-3' => { subtitle: 'かけざん暗算3', scale: :small, entries: [[%w[P1-3-2], 20]] },
   'S1-3-4' => { subtitle: 'かけざん暗算4', scale: :small, entries: [[%w[P1-3-3], 20]] },
   'S1-3-5' => { subtitle: 'かけざん暗算5', scale: :small, entries: [[%w[P1-3-4], 20]] },
   'S1-3-6' => { subtitle: 'かけざん暗算6', scale: :small, entries: [[%w[P1-3-5], 10], [%w[P1-3-6], 10]] },
@@ -557,14 +558,14 @@ def typ_preamble(title_text, stage_name, form, tag)
     #let ansfs = 10pt  // 解答の文字サイズ(人間が読みやすい固定サイズ)
 
     // --- ページ下端のタグ(印刷後に問題と解答を対応づけるための識別子) ---
-    // 用紙の左下から #{TAG_MARGIN}mm / #{TAG_MARGIN}mm。本文マージンの外側に置く。
+    // 用紙の左下から 横 #{TAG_MARGIN_X}mm / 縦 #{TAG_MARGIN_Y}mm。本文マージンの外側に置く。
     #let tag = "#{tag}"
-    #let tagmark(dx) = place(bottom + left, dx: dx, dy: -#{TAG_MARGIN}mm)[
+    #let tagmark(dx) = place(bottom + left, dx: dx, dy: -#{TAG_MARGIN_Y}mm)[
       #text(size: #{TAG_FS}pt, fill: luma(#{TAG_LUMA}))[#tag]]
     // 問題(A4 横)は A5×2 に切るため、左右それぞれの左下に入れる。
-    #let tagprob = { tagmark(#{TAG_MARGIN}mm); tagmark(#{A5_WIDTH + TAG_MARGIN}mm) }
+    #let tagprob = { tagmark(#{TAG_MARGIN_X}mm); tagmark(#{A5_WIDTH + TAG_MARGIN_X}mm) }
     // 解答(A4 縦)は左下 1 箇所。
-    #let tagans = tagmark(#{TAG_MARGIN}mm)
+    #let tagans = tagmark(#{TAG_MARGIN_X}mm)
 
     // A5 1 枚(1 回分)の見出し。大見出し・回・名前・得点、最後に問題本体との空き。
     #let probhead(title) = [

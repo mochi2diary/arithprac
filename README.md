@@ -8,7 +8,7 @@
 
 あくまで自分の子供にやらせているプリントを公開している位置づけのものなので，急に破壊的な仕様変更が入ります（公開されているプリントの形式が予告なく変更されます）。
 
-プリントおよびプログラムを使用した結果についての責任は一切負いません。あらかじめご了承ください。
+プリントおよびプログラムを使用した結果や，プリントが急に提供されなくなったことなどについての責任は一切負いません。あらかじめご了承ください。
 
 プリントのPDFファイルは自動生成システムが正常動作していれば1日に1回夜間に更新され，最新のファイルと，1つ前のファイルが掲載されます。
 
@@ -34,6 +34,10 @@
 
 ### かけざん（暗算）
 
+- 九九 （2x2 .. 9x9）順番通り
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-1-prev.pdf)
+- 九九の範囲 （2x2 .. 9x9）ランダム
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-2-prev.pdf)
 - 2桁 × 2桁 （1は半分だけ出現）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-6.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-6-prev.pdf)
 

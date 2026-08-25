@@ -209,9 +209,9 @@ TBD
         - 3回: 6 x 2 = □ ～ 6 x 9 = □ が左側， 7 x 2 = □ ～ 7 x 9 = □ が右側に並ぶ。
         - 4回: 8 x 2 = □ ～ 8 x 9 = □ が左側， 9 x 2 = □ ～ 9 x 9 = □ が右側に並ぶ。
 - かけざん暗算2(S1-3-2)。スケールは `medium`。
-    - 1回あたり20問，同一の問題は各回あたり2回以上出題されない。
-    - P1-3-1: 20問
-- かけざん暗算3(S1-3-3)。スケールは `medium`。
+    - 1回あたり16問，同一の問題は各回あたり2回以上出題されない。
+    - P1-3-1: 16問
+- かけざん暗算3(S1-3-3)。スケールは `small`。
     - 1回あたり20問，同一の問題は各回あたり2回以上出題されない。
     - P1-3-2: 20問
 - かけざん暗算4(S1-3-4)。スケールは `small`。
@@ -286,10 +286,15 @@ TBD
 
 #### 1問分の行 — `probrow(n, a, b)`
 
+1回あたりの問題数は，`--scale` 指定毎に以下の値を想定する。
+    - `small`: 20問(10問×2列)
+    - `medium`: 16問(8問×2列)
+    - `large`: 10問(5問×2列)
+
 1 問を 6 セルの表で表す。列幅は `columns: (numw, valw, opw, valw, opw, auto)`，罫線なし(`stroke: none`)，縦中央揃え(`align: horizon`)。行間は `--scale`` 指定により異なる。
-    - `small`: `inset: (x: 2pt, y: 6pt)`
-    - `medium`: `inset: (x: 2pt, y: 9pt)`
-    - `large`: `inset: (x: 2pt, y: 12pt)`
+    - `small`: `inset: (x: 2pt, y: 10pt)`
+    - `medium`: `inset: (x: 2pt, y: 11pt)`
+    - `large`: `inset: (x: 2pt, y: 20pt)`
 
 - 列幅定数: `numw = 6mm`(番号)，`valw = 10mm`(被演算数・演算数。3桁でも右揃えで収まる)，`opw = 5mm`(演算子)。
 - 各セル:
@@ -309,9 +314,9 @@ TBD
 - **解答欄 `ansbox`**
     - `box(width: boxw, height: boxh, stroke: 0.7pt, radius: 1pt)`。
     - サイズは `--scale` 指定により異なる。
-        - `small`: `boxw = 24mm`(横長の□)，`boxh = 8mm`(手書き用に本文より大きめ)。
-        - `medium`: `boxw = 28mm`(横長の□)，`boxh = 12mm`(手書き用に本文より大きめ)。
-        - `large`: `boxw = 28mm`(横長の□)，`boxh = 16mm`(手書き用に本文より大きめ)。
+        - `small`: `boxw = 26mm`(横長の□)，`boxh = 9mm`(手書き用に本文より大きめ)。
+        - `medium`: `boxw = 26mm`(横長の□)，`boxh = 12mm`(手書き用に本文より大きめ)。
+        - `large`: `boxw = 26mm`(横長の□)，`boxh = 18mm`(手書き用に本文より大きめ)。
 
 #### 前半/後半の振り分け
 
@@ -389,7 +394,7 @@ TBD
 
 - `#set page(flipped: false, margin: (x: 10mm, y: 10mm))`
     - A4 縦(portrait)。マージンは左右・上下とも 10mm。
-- 見出し: 中央揃え，16pt，太字。文言は現行「暗算マスター 解答」。その後 `#v(6pt)`。
+- 見出し: 中央揃え，16pt，太字。文言は "暗算マスター ステージ名 解答"。その後 `#v(6pt)`。
 - 全 SETS 回分の解答ブロックを横 4 列に配置: `grid(columns: (1fr, 1fr, 1fr, 1fr), column-gutter: 3mm, row-gutter: 6pt)`(横に4回分並べて1ページに多くの回を収める)。
 
 #### 1回分の解答ブロック — `ansblock(title, items, leftn)`
