@@ -5,11 +5,16 @@
 # 動作要件: Ruby 4.0 以降（標準ライブラリのみ）
 # 出力     : Typst ファイル(.typ)を生成し、typst でコンパイルして PDF を得る
 #
+# 出題形式:
+#   - 暗算(P1-x-x): 式を 1 行に並べ、右端の□に答えを書かせる。
+#   - 筆算(P2-x-x): 1 回分の領域をリージョンに等分割し、1 問ずつ筆算の形で置く。
+#
 # 生成物:
 #   - 問題 : A4 横(landscape)を中央で 2 分割して A5×2。1 枚(A5)に 1 回分。
 #            1 ページ = 2 回分。--pages で回数を制御(回数 = 2 * pages)。
-#            中央に切り取り線を入れる。左に前半・右に後半を並べる
-#            (奇数個なら左が 1 つ多い)。
+#            中央に切り取り線を入れる。
+#            暗算は左に前半・右に後半を並べる(奇数個なら左が 1 つ多い)。
+#            筆算は 1 回分を --num 個のリージョンに分けて行優先に並べる。
 #   - 解答 : A4 縦。全回分をまとめて印刷(切らない)。「第N回」で対応付ける。
 #
 # 出題の指定:
@@ -25,11 +30,28 @@ DEFAULT_PAGES    = 10  # 問題ページ数の既定値(1 ページ = 2 回分 �
 DEFAULT_PROBLEMS = 20  # 1 回あたりの問題数の既定値(--pattern 使用時)
 MIN_PROBLEMS     = 2   # 1 回あたりの問題数の下限
 MAX_PROBLEMS     = 26  # 1 回あたりの問題数の上限
+DEFAULT_REGIONS  = 6   # 筆算の 1 回あたりの問題数(= リージョン数)の既定値
 JP_FONT          = 'BIZ UDGothic'
+# 筆算の数字・演算子だけに使うフォント(本文の JP_FONT とは独立に選ぶ)。
+COLUMN_DIGIT_FONT = 'BIZ UDGothic'
 BASENAME         = 'arithprac'
 
-# 演算子記号(表示用)
-OP_SYM = { add: '+', sub: '−', mul: '×' }.freeze
+# 筆算のリージョン分割形 { 問題数(= リージョン数) => [縦の個数(行), 横の個数(列)] }
+REGION_SHAPES = { 12 => [4, 3], 8 => [4, 2], 6 => [3, 2], 4 => [2, 2], 1 => [1, 1] }.freeze
+
+# ページ下端のタグ(シード下位 16bit の 16 進 4 文字)。印刷後に問題と解答を対応づける。
+# 問題(A4 横)は切り離した A5 の左下それぞれに、解答(A4 縦)は左下 1 箇所に入れる。
+TAG_MARGIN = 5      # 用紙の左端・下端からの距離(mm)。プリンタの印字限界に近い位置。
+TAG_FS     = 6      # タグの文字サイズ(pt)
+TAG_LUMA   = 120    # タグの文字色(luma。小さいほど濃い)
+A5_WIDTH   = 148.5  # A4 横を 2 分割した A5 1 枚の幅(mm)
+
+# 見出し(回・名前・得点)と問題本体の間の空き(pt)。出題形式ごとに異なる。
+HEAD_GAP = { mental: 8, column: 12 }.freeze
+
+# 演算子記号(表示用)。筆算は全角を使う(半角より字形が広く、字間が行間と釣り合う)。
+OP_SYM     = { add: '+', sub: '−', mul: '×' }.freeze
+OP_SYM_ZEN = { add: '＋', sub: '－', mul: '×' }.freeze
 
 # スケール(文字・解答欄サイズ)。値は pt / mm(単位はテンプレート側で付与)。
 #   inset_y : 問題行の行間(y)         valfs : 数値・等号のフォント
@@ -41,13 +63,40 @@ SCALES = {
 }.freeze
 DEFAULT_SCALE = :small
 
+# 筆算のスケール。リージョン割り(--num)とは独立の設定。値は mm / pt。
+#   digw    : 数字 1 桁分のセルの幅          digfs    : 数字のフォント
+#   digh_a  : 被加数行の高さ                 digh_b   : 加数行の高さ
+#   ruleh   : 横線行の高さ                   rulethk  : 横線の太さ
+#   rpad_x  : リージョン内の左右の余白         rpad_top : 同・上の余白(繰り上がりを書く分)
+# 解答記入行の高さは 1fr(リージョンの余りを吸収する)。
+COLUMN_SCALES = {
+  small:  { digw: 4.8, digh_a: 7.2,  digh_b: 6,   digfs: 14, ruleh: 0.5, rulethk: 0.6,
+            rpad_x: 3.6, rpad_top: 6 },
+  medium: { digw: 6,   digh_a: 9.6,  digh_b: 7.5, digfs: 16, ruleh: 0.5, rulethk: 0.7,
+            rpad_x: 4,   rpad_top: 7 },
+  large:  { digw: 6.9, digh_a: 10.8, digh_b: 9,   digfs: 18, ruleh: 0.5, rulethk: 0.8,
+            rpad_x: 4.8, rpad_top: 8 }
+}.freeze
+
 # ---- パターン定義 ------------------------------------------------------
-# 各パターンは op(:add/:mul)と、[a, b] を返す生成 proc を持つ。
+# 各パターンは op(:add/:sub/:mul)と、[a, b] を返す生成 proc を持つ。
 # 制約(桁範囲・繰り上がり・0/1 の出現など)は棄却サンプリングで満たす。
+# form は出題形式。P1-x-x は暗算(:mental)、P2-x-x は筆算(:column)。
 PATTERNS = {}
 
 def def_pattern(id, op, &gen)
-  PATTERNS[id.upcase] = { id: id, op: op, gen: gen }
+  form = id.upcase.start_with?('P2') ? :column : :mental
+  PATTERNS[id.upcase] = { id: id, op: op, form: form, gen: gen }
+end
+
+# パターン ID の出題形式(:mental / :column)。
+def pattern_form(pid)
+  PATTERNS[pid.upcase][:form]
+end
+
+# 数字を全角にする。筆算の問題部分のみで使う(解答ページは半角のまま)。
+def zen_digits(n)
+  n.to_s.tr('0-9', '０-９')
 end
 
 def no_zero?(n)
@@ -106,6 +155,43 @@ def_pattern('P1-3-6', :mul) do
   end
 end
 
+# --- 筆算-加算(P2-1-x)---
+# 繰り上がりの有無は各位の和で判定する。「十の位への繰り上がり」= 一の位からの繰上げ、
+# 「百の位への繰り上がり」= 十の位からの繰上げ、「千の位への繰り上がり」= 百の位から。
+def_pattern('P2-1-1', :add) do   # 2桁 + 1桁 = 2桁(繰り上がりなし)
+  loop { a = rand(10..99); b = rand(1..9); break [a, b] if a % 10 + b <= 9 }
+end
+def_pattern('P2-1-2', :add) do   # 2桁 + 1桁 = 2桁(十の位への繰り上がりあり)
+  loop { a = rand(10..99); b = rand(1..9); break [a, b] if a % 10 + b >= 10 && a + b <= 99 }
+end
+def_pattern('P2-1-3', :add) do   # 2桁 + 2桁 = 2桁(繰り上がりなし)
+  loop do
+    a = rand(10..99); b = rand(10..99)
+    break [a, b] if a % 10 + b % 10 <= 9 && a / 10 + b / 10 <= 9
+  end
+end
+def_pattern('P2-1-4', :add) do   # 2桁 + 2桁 = 2桁(十の位への繰り上がりあり)
+  loop do
+    a = rand(10..99); b = rand(10..99)
+    break [a, b] if a % 10 + b % 10 >= 10 && a + b <= 99
+  end
+end
+def_pattern('P2-1-5', :add) do   # 2桁 + 2桁 = 3桁(百の位への繰り上がりあり)
+  loop { a = rand(10..99); b = rand(10..99); break [a, b] if a + b >= 100 }
+end
+def_pattern('P2-1-6', :add) do   # 3桁 + 2桁 = 3桁(千の位への繰り上がりなし)
+  loop { a = rand(100..999); b = rand(10..99); break [a, b] if a + b <= 999 }
+end
+def_pattern('P2-1-7', :add) do   # 3桁 + 2桁(千の位への繰り上がりあり → 結果 4桁)
+  loop { a = rand(100..999); b = rand(10..99); break [a, b] if a + b >= 1000 }
+end
+def_pattern('P2-1-8', :add) do   # 3桁 + 3桁 = 3桁(千の位への繰り上がりなし)
+  loop { a = rand(100..999); b = rand(100..999); break [a, b] if a + b <= 999 }
+end
+def_pattern('P2-1-9', :add) do   # 3桁 + 3桁 = 4桁(千の位への繰り上がりあり)
+  loop { a = rand(100..999); b = rand(100..999); break [a, b] if a + b >= 1000 }
+end
+
 # ---- 制約(コスト関数)---------------------------------------------------
 # 1 回内で「総コストを上限以下に保つ」ための各問コスト関数。
 # adjust! がコストの正の問題を差し替えて総コストを調整する(下記参照)。
@@ -114,6 +200,20 @@ COST_B_ONES   = ->(p) { p[:b].to_s.count('1') }   # 減数(b)に現れる '1' �
 COST_ZERO_ANS = ->(p) { p[:ans].zero? ? 1 : 0 }   # 答えが 0 なら 1
 COST_ZERO_TEN_ANS = ->(p) { [0, 10].include?(p[:ans]) ? 1 : 0 } # 答えが 0 または 10 なら 1
 COST_A_TEN    = ->(p) { p[:a] == 10 ? 1 : 0 }     # 被減数(a)が 10 なら 1
+# 被加数・加数の一の位に現れる '0' と '1' の個数(0〜2)
+COST_UNITS_ZERO_ONE = ->(p) { [p[:a] % 10, p[:b] % 10].count { |d| [0, 1].include?(d) } }
+# 被加数(a)の十の位が '1' なら 1
+COST_A_TENS_ONE = ->(p) { p[:a] / 10 % 10 == 1 ? 1 : 0 }
+# 被加数(a)の十の位が '0' または '1' なら 1
+COST_A_TENS_ZERO_ONE = ->(p) { [0, 1].include?(p[:a] / 10 % 10) ? 1 : 0 }
+# 被加数・加数の十の位に現れる '0' と '1' の個数(0〜2)
+COST_TENS_ZERO_ONE = ->(p) { [p[:a] / 10 % 10, p[:b] / 10 % 10].count { |d| [0, 1].include?(d) } }
+
+# 筆算-加算ステージの制約セット。一の位の '0'/'1' は 1 回までで共通。
+# 十の位の条件だけがステージの進行につれて広がる。
+CONSTR_A_TENS_ONE      = [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ONE, 2]].freeze
+CONSTR_A_TENS_ZERO_ONE = [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ZERO_ONE, 2]].freeze
+CONSTR_TENS_ZERO_ONE   = [[COST_UNITS_ZERO_ONE, 1], [COST_TENS_ZERO_ONE, 2]].freeze
 
 # ---- ステージ定義 ------------------------------------------------------
 # entries: [[パターン候補配列, 問題数], ...]。候補が複数なら等確率で 1 つ選ぶ。
@@ -141,11 +241,28 @@ STAGES = {
   'S1-3-3' => { subtitle: 'かけざん暗算3', scale: :medium, entries: [[%w[P1-3-2], 20]] },
   'S1-3-4' => { subtitle: 'かけざん暗算4', scale: :small, entries: [[%w[P1-3-3], 20]] },
   'S1-3-5' => { subtitle: 'かけざん暗算5', scale: :small, entries: [[%w[P1-3-4], 20]] },
-  'S1-3-6' => { subtitle: 'かけざん暗算6', scale: :small, entries: [[%w[P1-3-5], 10], [%w[P1-3-6], 10]] }
+  'S1-3-6' => { subtitle: 'かけざん暗算6', scale: :small, entries: [[%w[P1-3-5], 10], [%w[P1-3-6], 10]] },
+  'S2-1-1' => { subtitle: 'たしざん筆算1', scale: :large, constraints: CONSTR_A_TENS_ONE,
+                entries: [[%w[P2-1-1], 12]] },
+  'S2-1-2' => { subtitle: 'たしざん筆算2', scale: :large, constraints: CONSTR_A_TENS_ONE,
+                entries: [[%w[P2-1-1], 4], [%w[P2-1-2], 8]] },
+  'S2-1-3' => { subtitle: 'たしざん筆算3', scale: :large, constraints: CONSTR_A_TENS_ONE,
+                entries: [[%w[P2-1-3], 4], [%w[P2-1-4], 8]] },
+  'S2-1-4' => { subtitle: 'たしざん筆算4', scale: :large, constraints: CONSTR_A_TENS_ZERO_ONE,
+                entries: [[%w[P2-1-4], 1], [%w[P2-1-5], 3], [%w[P2-1-6], 8]] },
+  'S2-1-5' => { subtitle: 'たしざん筆算5', scale: :large, constraints: CONSTR_TENS_ZERO_ONE,
+                entries: [[%w[P2-1-7], 2], [%w[P2-1-8], 4], [%w[P2-1-9], 6]] }
 }.freeze
 
 def stage_num(stage)
   stage[:entries].sum { |_pats, count| count }
+end
+
+# ステージの出題形式(:mental / :column)。九九(entries 無し)は暗算。
+def stage_form(stage)
+  return :mental unless stage[:entries]
+
+  pattern_form(stage[:entries].first[0].first)
 end
 
 # ---- 問題生成 ----------------------------------------------------------
@@ -311,9 +428,15 @@ end
 # ---- Typst 生成 --------------------------------------------------------
 
 # 問題テーブルのセル配列(Typst の array of dict リテラル)。
-def typ_problems(items)
+# 筆算(:column)は数字・演算子とも全角で渡す。暗算(:mental)は半角のまま
+# (1 つのテキストランで組むため、全角にすると字送りが valw を超える)。
+def typ_problems(items, form = :mental)
   '(' + items.map { |p|
-    %{(n: "#{circled(p[:n])}", a: #{p[:a]}, b: #{p[:b]}, op: "#{OP_SYM[p[:op]]}")}
+    if form == :column
+      %{(n: "#{circled(p[:n])}", a: "#{zen_digits(p[:a])}", b: "#{zen_digits(p[:b])}", op: "#{OP_SYM_ZEN[p[:op]]}")}
+    else
+      %{(n: "#{circled(p[:n])}", a: #{p[:a]}, b: #{p[:b]}, op: "#{OP_SYM[p[:op]]}")}
+    end
   }.join(', ') + ',)'
 end
 
@@ -322,17 +445,54 @@ def typ_answers(items)
   '(' + items.map { |p| %{(n: "#{circled(p[:n])}", p: #{p[:ans]})} }.join(', ') + ',)'
 end
 
-def build_typst(sets, num, title_text, stage_name = nil, scale = DEFAULT_SCALE)
-  sets_count = sets.size
-  ln = left_count(num)
-  s = SCALES[scale]
-  out = +''
-  out << <<~TYP
+# 暗算・筆算で共通の前文(フォント・見出し・切り取り線・A4 横 1 ページの組み方)。
+def typ_preamble(title_text, stage_name, form, tag)
+  <<~TYP
     // 自動生成ファイル (arithprac.rb) — 直接編集しないでください。
     #set text(font: "#{JP_FONT}", size: 12pt, lang: "ja")
 
     // ステージ名(ステージ指定時のみ。空文字なら非表示)。「第N回」の左に置く。
     #let stagename = "#{stage_name}"
+
+    #let ansfs = 10pt  // 解答の文字サイズ(人間が読みやすい固定サイズ)
+
+    // --- ページ下端のタグ(印刷後に問題と解答を対応づけるための識別子) ---
+    // 用紙の左下から #{TAG_MARGIN}mm / #{TAG_MARGIN}mm。本文マージンの外側に置く。
+    #let tag = "#{tag}"
+    #let tagmark(dx) = place(bottom + left, dx: dx, dy: -#{TAG_MARGIN}mm)[
+      #text(size: #{TAG_FS}pt, fill: luma(#{TAG_LUMA}))[#tag]]
+    // 問題(A4 横)は A5×2 に切るため、左右それぞれの左下に入れる。
+    #let tagprob = { tagmark(#{TAG_MARGIN}mm); tagmark(#{A5_WIDTH + TAG_MARGIN}mm) }
+    // 解答(A4 縦)は左下 1 箇所。
+    #let tagans = tagmark(#{TAG_MARGIN}mm)
+
+    // A5 1 枚(1 回分)の見出し。大見出し・回・名前・得点、最後に問題本体との空き。
+    #let probhead(title) = [
+      #align(center)[#text(size: 18pt, weight: "bold")[#{title_text}]]
+      #v(3pt)
+      #align(center)[#text(size: 10pt)[
+        #if stagename != "" [#stagename #h(6mm)]#title #h(8mm) 名前 #box(width: 28mm, stroke: (bottom: 0.5pt))[] #h(4mm) 得点 #box(width: 14mm, stroke: (bottom: 0.5pt))[]
+      ]]
+      #v(#{HEAD_GAP[form]}pt)
+    ]
+
+    // 中央の切り取り線(A4 横を A5×2 に分けるための目印)
+    #let cutline = place(top + center,
+      rect(width: 0pt, height: 100%,
+        stroke: (left: (paint: luma(150), thickness: 0.6pt, dash: "dashed"))))
+
+    // A4 横 1 ページ = A5 2 枚(2 回分)
+    #let sheetpair(setA, setB) = {
+      grid(columns: (1fr, 1fr), column-gutter: 10mm, setA, setB)
+      cutline
+    }
+  TYP
+end
+
+# 問題(暗算)の定義。1 問 = 6 セルの行、A5 1 枚は前半/後半の 2 列。
+def typ_mental_defs(scale)
+  s = SCALES[scale]
+  <<~TYP
 
     // --- 寸法(スケール: #{scale}) ---
     #let boxw = #{s[:boxw]}mm   // 解答欄(横長の□)の幅
@@ -344,7 +504,6 @@ def build_typst(sets, num, title_text, stage_name = nil, scale = DEFAULT_SCALE)
     #let opfs  = #{s[:opfs]}pt  // 演算子(+/×)のフォントサイズ
 
     #let ansbox = box(width: boxw, height: boxh, stroke: 0.7pt, radius: 1pt)
-    #let ansfs = 10pt  // 解答の文字サイズ(人間が読みやすい固定サイズ)
 
     // 1 問分の行(6 セル)。数値は右揃えで右端をそろえる。
     #let probrow(n, a, b, op) = (
@@ -366,28 +525,92 @@ def build_typst(sets, num, title_text, stage_name = nil, scale = DEFAULT_SCALE)
 
     // A5 1 枚分(1 回分)。左に前半、右に後半を並べる。
     #let probset(title, left, right) = block(width: 100%, height: 100%, [
-      #align(center)[#text(size: 18pt, weight: "bold")[#{title_text}]]
-      #v(3pt)
-      #align(center)[#text(size: 10pt)[
-        #if stagename != "" [#stagename #h(6mm)]#title #h(8mm) 名前 #box(width: 28mm, stroke: (bottom: 0.5pt))[] #h(4mm) 得点 #box(width: 14mm, stroke: (bottom: 0.5pt))[]
-      ]]
-      #v(8pt)
+      #probhead(title)
       // 左(前半)と右(後半)を区切る点線。線をやや左に寄せ、右列の番号との隙間を広めに。
       #grid(columns: (1fr, 1.5mm, 6mm, 1fr), align: top,
         grid.vline(x: 2, stroke: (paint: luma(140), thickness: 0.6pt, dash: "dotted")),
         probtable(left), [], [], probtable(right))
     ])
+  TYP
+end
 
-    // 中央の切り取り線(A4 横を A5×2 に分けるための目印)
-    #let cutline = place(top + center,
-      rect(width: 0pt, height: 100%,
-        stroke: (left: (paint: luma(150), thickness: 0.6pt, dash: "dashed"))))
+# 問題(筆算)の定義。見出し以降の残り領域を num 個のリージョンに等分し、
+# 1 リージョンに 1 問(右上寄せ)を配置する。番号はリージョンの左上に置く。
+def typ_column_defs(scale, num)
+  s = COLUMN_SCALES[scale]
+  rows, cols = REGION_SHAPES[num]
+  <<~TYP
 
-    // A4 横 1 ページ = A5 2 枚(2 回分)
-    #let sheetpair(setA, setB) = {
-      grid(columns: (1fr, 1fr), column-gutter: 10mm, setA, setB)
-      cutline
+    // --- 寸法(スケール: #{scale}) ---
+    #let digw    = #{s[:digw]}mm    // 数字 1 桁分のセル幅(1 桁 = 横 1 セル)
+    #let digha   = #{s[:digh_a]}mm    // 被加数行のセル高さ
+    #let dighb   = #{s[:digh_b]}mm    // 加数行のセル高さ
+    #let digfont = "#{COLUMN_DIGIT_FONT}"  // 数字・演算子のフォント(本文とは別)
+    #let digfs   = #{s[:digfs]}pt   // 数字・演算子のフォントサイズ
+    #let ruleh   = #{s[:ruleh]}mm   // 横線行の高さ
+    #let rulethk = #{s[:rulethk]}pt  // 横線の太さ
+    #let rpadx   = #{s[:rpad_x]}mm    // リージョン内の左右の余白
+    #let rpadtop = #{s[:rpad_top]}mm    // 同・上の余白(繰り上がりを書き込む分)
+    #let numfs   = 12pt   // 問題番号(丸数字)のフォントサイズ
+
+    // リージョンの区切り点線(外周には引かない)
+    #let regionline = (paint: luma(140), thickness: 0.4pt, dash: "dotted")
+
+    // 1 文字 = 1 セル。上下左右中央揃え。
+    #let digcell(c) = align(center + horizon)[#text(font: digfont, size: digfs)[#c]]
+
+    // 数字のクラスタ配列を nd 桁分のセル配列にする(右詰め。足りない上位桁は空セル)。
+    // 全角は 1 文字 3 バイトのため、桁数は必ずクラスタ数で数える(str.len() はバイト数)。
+    #let digcells(cs, nd) = range(nd - cs.len()).map(i => []) + cs.map(c => digcell(c))
+
+    // 筆算 1 問。最左は演算子列、その右に数字列(桁数は被加数/加数の多いほう)。
+    // 行は上から 被加数 / 加数 / 横線 / 解答記入。セル間に空白は作らない。
+    #let colprob(a, b, op) = {
+      let ca = str(a).clusters()
+      let cb = str(b).clusters()
+      let nd = calc.max(ca.len(), cb.len())
+      let nc = nd + 1  // 演算子列の分
+      grid(
+        columns: range(nc).map(i => digw),
+        // 解答記入行(最下行)は 1fr。リージョンの余った高さを書き込み欄にする。
+        rows: (digha, dighb, ruleh, 1fr),
+        stroke: none, inset: 0pt,
+        [], ..digcells(ca, nd),
+        digcell(op), ..digcells(cb, nd),
+        ..range(nc).map(i => align(horizon)[#line(length: 100%, stroke: rulethk)]),
+        ..range(nc).map(i => []),
+      )
     }
+
+    // 1 リージョン(1 問分)。問題は右寄せ、番号は左寄せで被加数行と同じ位置(上揃え)に置く。
+    // 行を 1fr にして、問題本体(解答記入行が 1fr)が残り高さいっぱいに広がるようにする。
+    #let region(it) = block(width: 100%, height: 100%,
+      inset: (top: rpadtop, right: rpadx, left: rpadx),
+      grid(columns: (auto, 1fr), rows: (1fr), align: (left + top, right + top),
+        text(size: numfs)[#it.n],
+        colprob(it.a, it.b, it.op)))
+
+    // 問題本体。#{num} 問 = 縦 #{rows} 個 × 横 #{cols} 列に等分割(番号は行優先)。
+    #let regiongrid(items) = grid(
+      columns: range(#{cols}).map(i => 1fr),
+      rows: range(#{rows}).map(i => 1fr),
+      stroke: none, inset: 0pt,
+      ..range(1, #{cols}).map(i => grid.vline(x: i, stroke: regionline)),
+      ..range(1, #{rows}).map(j => grid.hline(y: j, stroke: regionline)),
+      ..items.map(it => region(it)),
+    )
+
+    // A5 1 枚分(1 回分)。見出しは auto、残り(1fr)をリージョン割りに与える。
+    // (見出しの高さを差し引くため、外側を grid(rows: (auto, 1fr)) で組む)
+    #let probset(title, items) = block(width: 100%, height: 100%,
+      grid(rows: (auto, 1fr), columns: (100%), row-gutter: 0pt, inset: 0pt,
+        probhead(title), regiongrid(items)))
+  TYP
+end
+
+# 解答(A4 縦)。暗算・筆算で共通。
+def typ_answer_defs
+  <<~TYP
 
     // 解答 1 問分(番号・答えの 2 セル)。番号は左揃え、答えは右揃え。
     // これにより「枠左線↔番号」「点線↔右番号」「右答え↔枠右線」の隙間が
@@ -419,32 +642,51 @@ def build_typst(sets, num, title_text, stage_name = nil, scale = DEFAULT_SCALE)
           grid.vline(x: 2, stroke: (paint: luma(140), thickness: 0.6pt, dash: "dotted")),
           ansminicol(items.slice(0, leftn)), [], [], ansminicol(items.slice(leftn)))
       ])
-
-    // ================= 問題(A4 横) =================
-    #set page(paper: "a4", flipped: true, margin: (x: 6mm, y: 8mm))
   TYP
+end
 
-  # 問題ページ(2 回分ずつ)。前半 ln 問を左、残りを右に並べる。
-  (0...sets_count).step(2) do |i|
+# 問題ページ(A4 横。2 回分ずつ)。
+#   暗算: 前半 ln 問を左、残りを右に並べる。 筆算: 1 回分をそのまま渡す。
+def typ_problem_pages(sets, num, form)
+  ln = left_count(num)
+  out = +''
+  (0...sets.size).step(2) do |i|
     a = sets[i]
     b = sets[i + 1]
-    la = typ_problems(a[0...ln])
-    ra = typ_problems(a[ln...num])
-    lb = typ_problems(b[0...ln])
-    rb = typ_problems(b[ln...num])
-    out << %{\n#sheetpair(\n  probset("第#{i + 1}回", #{la}, #{ra}),\n  probset("第#{i + 2}回", #{lb}, #{rb}),\n)\n}
-    out << "#pagebreak()\n" if i + 2 < sets_count
+    args = if form == :column
+             ["\"第#{i + 1}回\", #{typ_problems(a, form)}", "\"第#{i + 2}回\", #{typ_problems(b, form)}"]
+           else
+             ["\"第#{i + 1}回\", #{typ_problems(a[0...ln])}, #{typ_problems(a[ln...num])}",
+              "\"第#{i + 2}回\", #{typ_problems(b[0...ln])}, #{typ_problems(b[ln...num])}"]
+           end
+    out << %{\n#sheetpair(\n  probset(#{args[0]}),\n  probset(#{args[1]}),\n)\n}
+    out << "#pagebreak()\n" if i + 2 < sets.size
   end
+  out
+end
+
+def build_typst(sets, num, title_text, stage_name, scale, form, tag)
+  out = +''
+  out << typ_preamble(title_text, stage_name, form, tag)
+  out << (form == :column ? typ_column_defs(scale, num) : typ_mental_defs(scale))
+  out << typ_answer_defs
+  out << <<~TYP
+
+    // ================= 問題(A4 横) =================
+    #set page(paper: "a4", flipped: true, margin: (x: 6mm, y: 8mm), background: tagprob)
+  TYP
+  out << typ_problem_pages(sets, num, form)
 
   # ================= 解答(A4 縦) =================
   out << <<~TYP
 
-    #set page(flipped: false, margin: (x: 10mm, y: 10mm))
+    #set page(flipped: false, margin: (x: 10mm, y: 10mm), background: tagans)
     #align(center)[#text(size: 16pt, weight: "bold")[#{title_text}#if stagename != "" [ #stagename] 解答]]
     #v(6pt)
     #grid(columns: (1fr, 1fr, 1fr, 1fr), column-gutter: 3mm, row-gutter: 6pt,
   TYP
 
+  ln = left_count(num)
   sets.each_with_index do |s, i|
     out << %{  ansblock("第#{i + 1}回", #{typ_answers(s)}, #{ln}),\n}
   end
@@ -456,7 +698,7 @@ end
 # ---- メイン ------------------------------------------------------------
 
 main = lambda do
-options = { pages: DEFAULT_PAGES, num: DEFAULT_PROBLEMS, seed: nil,
+options = { pages: nil, num: nil, seed: nil,
             stage: nil, patterns: [], ratios: [], output: nil, stage_list: false,
             scale: nil }
 
@@ -471,7 +713,9 @@ parser = OptionParser.new do |o|
   o.on('-s S', '--stage S', String, 'ステージ名(例: S1-1-1)。--num/--pattern/--ratio を無視。') { |v| options[:stage] = v }
   o.on('-p P', '--pages P', Integer, "問題のページ数(1 ページ = 2 回分, 既定 #{DEFAULT_PAGES})") { |v| options[:pages] = v }
   o.on('--stage-list', 'ステージ名とサブタイトルの一覧を表示して終了') { options[:stage_list] = true }
-  o.on('--num N', Integer, "1 回あたりの問題数 (#{MIN_PROBLEMS}〜#{MAX_PROBLEMS}, 既定 #{DEFAULT_PROBLEMS})") { |v| options[:num] = v }
+  o.on('-n N', '--num N', Integer,
+       "1 回あたりの問題数(暗算: #{MIN_PROBLEMS}〜#{MAX_PROBLEMS}, 既定 #{DEFAULT_PROBLEMS} / " \
+       "筆算: #{REGION_SHAPES.keys.join('・')} のいずれか, 既定 #{DEFAULT_REGIONS})") { |v| options[:num] = v }
   o.on('--pattern P', String, 'パターン名(例: P1-1-1)。複数指定可。--stage を無視。') { |v| options[:patterns] << v }
   o.on('--ratio R', Rational, 'パターンの混合比率(--pattern と同数)。合計 1 に正規化。') { |v| options[:ratios] << v }
   o.on('--scale S', String, '文字・解答欄サイズ small/medium/large(既定 small)。--stage 指定時は無視。') { |v| options[:scale] = v }
@@ -487,14 +731,14 @@ if options[:stage_list]
   exit
 end
 
-if options[:seed]
-  srand(options[:seed])
-  puts "seed = #{options[:seed]} で生成します。"
-else
-  puts '乱数 seed 指定なし(毎回異なる問題)。'
-end
+# seed は未指定でも必ず確定させる(印刷後の対応づけと再現のため)。
+# 完全な seed はログにのみ出力し、紙面には下位 16bit を 16 進 4 文字で入れる。
+seed = options[:seed] || Random.new_seed
+srand(seed)
+tag = format('%04X', seed & 0xFFFF)
+puts "seed = #{seed}#{options[:seed] ? '' : '(自動生成)'} で生成します。ページタグ: #{tag}"
 
-pages = options[:pages]
+pages = options[:pages] || DEFAULT_PAGES
 abort "エラー: --pages は 1 以上を指定してください(指定: #{pages})。" if pages < 1
 sets_count = 2 * pages
 
@@ -508,18 +752,19 @@ if options[:scale]
 end
 
 # 出題モードの決定: --stage 優先、無ければ --pattern、いずれも無ければエラー。
-title_text = '暗算マスター'
 stage_name = nil  # ステージ指定時のみサブタイトルを「第N回」の左に表示する
 scale = DEFAULT_SCALE
+form = :mental    # 出題形式(:mental=暗算 / :column=筆算)
 
 if options[:stage]
   key = options[:stage].upcase
   stage = STAGES[key]
   abort "エラー: ステージ '#{options[:stage]}' は存在しません(一覧は --stage-list)。" unless stage
-  warn '警告: --stage 指定時は --pattern/--ratio/--num は無視されます。' if !options[:patterns].empty? || !options[:ratios].empty?
+  warn '警告: --stage 指定時は --pattern/--ratio/--num は無視されます。' if !options[:patterns].empty? || !options[:ratios].empty? || options[:num]
   warn '警告: --stage 指定時は --scale は無視されます(ステージ固有のスケールを使用)。' if scale_opt
   stage_name = stage[:subtitle]
   scale = stage[:scale] # ステージ指定時は --scale を無視しステージ固有スケールを使う
+  form = stage_form(stage)
 
   if stage[:special] == :kuku
     # 九九: 問題数・並び順・回数(4)が固定。--pages も無視。
@@ -528,8 +773,14 @@ if options[:stage]
     puts "ステージ #{key}(#{stage[:subtitle]}): 九九固定 4 回・1 回 16 問(scale=#{scale}, CLI 指定は無視)。"
   else
     num = stage_num(stage)
+    # 筆算は問題数 = リージョン数。分割できない問題数のステージは定義ミス。
+    if form == :column && !REGION_SHAPES.key?(num)
+      abort "内部エラー: ステージ #{key} の問題数(#{num})はリージョンに分割できません" \
+            "(#{REGION_SHAPES.keys.join(' / ')})。"
+    end
     sets = Array.new(sets_count) { make_stage_set(stage) }
-    puts "ステージ #{key}(#{stage[:subtitle]}): #{sets_count} 回・1 回 #{num} 問(scale=#{scale})。"
+    puts "ステージ #{key}(#{stage[:subtitle]}): #{pages} ページ・#{sets_count} 回・1 回 #{num} 問" \
+         "(form=#{form}, scale=#{scale})。"
   end
 
 elsif !options[:patterns].empty?
@@ -537,9 +788,21 @@ elsif !options[:patterns].empty?
   unknown = patterns.reject { |p| PATTERNS.key?(p.upcase) }
   abort "エラー: パターンが存在しません: #{unknown.join(', ')}" unless unknown.empty?
 
-  num = options[:num]
-  unless (MIN_PROBLEMS..MAX_PROBLEMS).include?(num)
-    abort "エラー: 問題数は #{MIN_PROBLEMS}〜#{MAX_PROBLEMS} の範囲で指定してください(指定: #{num})。"
+  forms = patterns.map { |p| pattern_form(p) }.uniq
+  abort 'エラー: 暗算(P1-x-x)と筆算(P2-x-x)のパターンは同時に指定できません。' if forms.size > 1
+  form = forms.first
+
+  if form == :column
+    # 筆算: 問題数がリージョン分割形を決めるため、分割できる値のみ受け付ける。
+    num = options[:num] || DEFAULT_REGIONS
+    unless REGION_SHAPES.key?(num)
+      abort "エラー: 筆算の問題数は #{REGION_SHAPES.keys.join(' / ')} のいずれかを指定してください(指定: #{num})。"
+    end
+  else
+    num = options[:num] || DEFAULT_PROBLEMS
+    unless (MIN_PROBLEMS..MAX_PROBLEMS).include?(num)
+      abort "エラー: 問題数は #{MIN_PROBLEMS}〜#{MAX_PROBLEMS} の範囲で指定してください(指定: #{num})。"
+    end
   end
 
   ratios = options[:ratios]
@@ -555,7 +818,7 @@ elsif !options[:patterns].empty?
 
   scale = scale_opt || DEFAULT_SCALE
   sets = Array.new(sets_count) { make_pattern_set(patterns, ratios, num) }
-  puts "パターン #{patterns.join(', ')}: #{sets_count} 回・1 回 #{num} 問(scale=#{scale})。"
+  puts "パターン #{patterns.join(', ')}: #{sets_count} 回・1 回 #{num} 問(form=#{form}, scale=#{scale})。"
 
 else
   warn 'エラー: --stage または --pattern を指定してください(一覧は --stage-list)。'
@@ -572,7 +835,10 @@ pdf_path = if options[:output]&.downcase&.end_with?('.pdf')
            end
 typ_path = pdf_path.sub(/\.pdf\z/i, '.typ')
 
-File.write(typ_path, build_typst(sets, num, title_text, stage_name, scale))
+# 大見出しは出題形式で決まる。
+title_text = form == :column ? '筆算マスター' : '暗算マスター'
+
+File.write(typ_path, build_typst(sets, num, title_text, stage_name, scale, form, tag))
 puts "Typst ファイルを生成: #{typ_path}"
 
 if system('typst', 'compile', typ_path, pdf_path)
