@@ -193,6 +193,123 @@ def_pattern('P2-1-9', :add) do   # 3桁 + 3桁 = 4桁(千の位への繰り上�
   loop { a = rand(100..999); b = rand(100..999); break [a, b] if a + b >= 1000 }
 end
 
+# --- 筆算-減算(P2-2-x)---
+# 「○の位の繰り下がり」= ○の位の数値を 1 つ減らして 1 つ下の位を 10 増やす操作。
+# 例: 67 - 8 は一の位が 7 < 8 なので「十の位の繰り下がりあり」。
+# sub_borrows(a, b) は下の位から順に [十の位, 百の位, 千の位] の繰り下がりの
+# 有無を返す(i 桁目の計算で下位からの借りを含めて引けなければ、その 1 つ上の位で
+# 繰り下がりが起きる)。
+def sub_borrows(a, b)
+  carry = false
+  (0..2).map do |i|
+    d = 10**i
+    carry = a / d % 10 < b / d % 10 + (carry ? 1 : 0)
+  end
+end
+
+def_pattern('P2-2-1', :sub) do   # 2桁 - 1桁 = 2桁(繰り下がりなし)
+  loop { a = rand(10..99); b = rand(1..9); break [a, b] if a % 10 >= b }
+end
+def_pattern('P2-2-2', :sub) do   # 2桁 - 1桁 = 2桁(十の位の繰り下がりあり)
+  # 繰り下がりで十の位が 1 減るため、結果を 2 桁に保つには a >= 20 が要る。
+  loop { a = rand(20..99); b = rand(1..9); break [a, b] if a % 10 < b }
+end
+def_pattern('P2-2-3', :sub) do   # 3桁 - 2桁 = 3桁(百・十の位の繰り下がりなし)
+  loop do
+    a = rand(100..999); b = rand(10..99)
+    br = sub_borrows(a, b)
+    break [a, b] if !br[0] && !br[1]
+  end
+end
+def_pattern('P2-2-4', :sub) do   # 3桁 - 2桁 = 3桁(百の位なし・十の位あり)
+  loop do
+    a = rand(100..999); b = rand(10..99)
+    br = sub_borrows(a, b)
+    break [a, b] if br[0] && !br[1]
+  end
+end
+def_pattern('P2-2-5', :sub) do   # 3桁 - 2桁 = 2桁(百の位あり・十の位なし)
+  # 結果が 2 桁 = 百の位の繰り下がりで百の位が 0 になる、すなわち被減数は 100..199。
+  loop do
+    a = rand(100..199); b = rand(10..99)
+    br = sub_borrows(a, b)
+    break [a, b] if !br[0] && br[1]
+  end
+end
+def_pattern('P2-2-6', :sub) do   # 3桁 - 2桁 = 2桁(百・十の位の繰り下がりあり)
+  loop do
+    a = rand(100..199); b = rand(10..99)
+    br = sub_borrows(a, b)
+    break [a, b] if br[0] && br[1] && a - b >= 10
+  end
+end
+def_pattern('P2-2-7', :sub) do   # 3桁 - 3桁 = 3桁(百・十の位の繰り下がりなし)
+  loop do
+    a = rand(100..999); b = rand(100..999)
+    br = sub_borrows(a, b)
+    break [a, b] if !br[0] && !br[1] && a - b >= 100
+  end
+end
+def_pattern('P2-2-8', :sub) do   # 3桁 - 3桁 = 3桁(百の位なし・十の位あり)
+  loop do
+    a = rand(100..999); b = rand(100..999)
+    br = sub_borrows(a, b)
+    break [a, b] if br[0] && !br[1] && a - b >= 100
+  end
+end
+def_pattern('P2-2-9', :sub) do   # 3桁 - 3桁 = 2〜3桁(百の位あり・十の位なし)
+  loop do
+    a = rand(100..999); b = rand(100..999)
+    br = sub_borrows(a, b)
+    break [a, b] if !br[0] && br[1] && a - b >= 10
+  end
+end
+def_pattern('P2-2-10', :sub) do  # 3桁(下 2 桁 ≠ 00) - 3桁 = 2〜3桁(百・十の位あり)
+  loop do
+    a = rand(100..999); b = rand(100..999)
+    next if (a % 100).zero?
+
+    br = sub_borrows(a, b)
+    break [a, b] if br[0] && br[1] && a - b >= 10
+  end
+end
+def_pattern('P2-2-11', :sub) do  # 3桁(下 2 桁 = 00) - 3桁 = 2〜3桁(百・十の位あり)
+  # 被減数が X00 なら一の位で必ず借りが要る(減数の一の位が 0 でなければ)。
+  # 100 では 2 桁以上の結果を作れない(減数も 3 桁のため)ので 200 以上とする。
+  loop do
+    a = rand(2..9) * 100; b = rand(100..999)
+    br = sub_borrows(a, b)
+    break [a, b] if br[0] && br[1] && a - b >= 10
+  end
+end
+def_pattern('P2-2-12', :sub) do  # 4桁 - 3〜4桁 = 4桁(千の位の繰り下がりなし)
+  loop do
+    a = rand(1000..9999); b = rand(100..9999)
+    break [a, b] if !sub_borrows(a, b)[2] && a - b >= 1000
+  end
+end
+def_pattern('P2-2-13', :sub) do  # 4桁 - 3〜4桁 = 3〜4桁(千の位の繰り下がりあり)
+  loop do
+    a = rand(1000..9999); b = rand(100..9999)
+    break [a, b] if sub_borrows(a, b)[2] && a - b >= 100
+  end
+end
+def_pattern('P2-2-14', :sub) do  # 4桁(下 3 桁 ≠ 000) - 3〜4桁 = 3〜4桁(千・百・十の位あり)
+  loop do
+    a = rand(1000..9999); b = rand(100..9999)
+    next if (a % 1000).zero?
+
+    break [a, b] if sub_borrows(a, b).all? && a - b >= 100
+  end
+end
+def_pattern('P2-2-15', :sub) do  # 4桁(下 3 桁 = 000) - 2〜4桁 = 2〜4桁(千・百・十の位あり)
+  # 被減数が X000 なら、減数の一の位が 0 でない限り 3 つの位すべてで繰り下がる。
+  loop do
+    a = rand(1..9) * 1000; b = rand(10..9999)
+    break [a, b] if sub_borrows(a, b).all? && a - b >= 10
+  end
+end
+
 # ---- 制約(コスト関数)---------------------------------------------------
 # 1 回内で「総コストを上限以下に保つ」ための各問コスト関数。
 # adjust! がコストの正の問題を差し替えて総コストを調整する(下記参照)。
@@ -201,16 +318,16 @@ COST_B_ONES   = ->(p) { p[:b].to_s.count('1') }   # 減数(b)に現れる '1' �
 COST_ZERO_ANS = ->(p) { p[:ans].zero? ? 1 : 0 }   # 答えが 0 なら 1
 COST_ZERO_TEN_ANS = ->(p) { [0, 10].include?(p[:ans]) ? 1 : 0 } # 答えが 0 または 10 なら 1
 COST_A_TEN    = ->(p) { p[:a] == 10 ? 1 : 0 }     # 被減数(a)が 10 なら 1
-# 被加数・加数の一の位に現れる '0' と '1' の個数(0〜2)
+# 第 1 項・第 2 項(被加数と加数 / 被減数と減数)の一の位に現れる '0' と '1' の個数(0〜2)
 COST_UNITS_ZERO_ONE = ->(p) { [p[:a] % 10, p[:b] % 10].count { |d| [0, 1].include?(d) } }
-# 被加数(a)の十の位が '1' なら 1
+# 第 1 項(被加数・被減数)の十の位が '1' なら 1
 COST_A_TENS_ONE = ->(p) { p[:a] / 10 % 10 == 1 ? 1 : 0 }
-# 被加数(a)の十の位が '0' または '1' なら 1
+# 第 1 項(被加数・被減数)の十の位が '0' または '1' なら 1
 COST_A_TENS_ZERO_ONE = ->(p) { [0, 1].include?(p[:a] / 10 % 10) ? 1 : 0 }
-# 被加数・加数の十の位に現れる '0' と '1' の個数(0〜2)
+# 第 1 項・第 2 項の十の位に現れる '0' と '1' の個数(0〜2)
 COST_TENS_ZERO_ONE = ->(p) { [p[:a] / 10 % 10, p[:b] / 10 % 10].count { |d| [0, 1].include?(d) } }
 # 1 問の中で被演算数どうしが似すぎなら 1。同じ桁数で相違する桁が 1 つ以下
-# (649 + 639 や 136 + 136 など)を「似すぎ」とする。桁数が違えば似ていない。
+# (649 + 639 や 136 + 136、345 - 341 など)を「似すぎ」とする。桁数が違えば似ていない。
 # 1 桁どうしは必ず相違 1 桁以下になるため、2 桁以上のみを対象とする。
 COST_SIMILAR_AB = lambda do |p|
   sa = p[:a].to_s
@@ -220,13 +337,54 @@ COST_SIMILAR_AB = lambda do |p|
   sa.chars.zip(sb.chars).count { |x, y| x != y } <= 1 ? 1 : 0
 end
 
-# 筆算-加算ステージの制約セット。1 問内で被加数と加数が似すぎるのを禁止(上限 0)
+# 減数(b)の一の位が '1' なら 1
+COST_B_UNITS_ONE = ->(p) { p[:b] % 10 == 1 ? 1 : 0 }
+# 減数(b)の十の位(2 桁以上のときのみ)と一の位に現れる '0' の個数(0〜2)
+COST_B_LOW_ZERO = ->(p) { p[:b].to_s.chars.last(2).count('0') }
+# 答えの一の位が '0' または '1' なら 1
+COST_ANS_UNITS_ZERO_ONE = ->(p) { [0, 1].include?(p[:ans] % 10) ? 1 : 0 }
+# 答えの一の位が '0' なら 1
+COST_ANS_UNITS_ZERO = ->(p) { (p[:ans] % 10).zero? ? 1 : 0 }
+# (第 1 項の一の位, 第 2 項の一の位) の組。1 回内での重複を見るための鍵。
+UNITS_PAIR = ->(p) { [p[:a] % 10, p[:b] % 10] }
+# (第 1 項の下 2 桁, 第 2 項の下 2 桁) の組。同上(3 桁以上の問題向け)。
+LOW2_PAIR  = ->(p) { [p[:a] % 100, p[:b] % 100] }
+
+# 鍵 key の値が 1 回内で重複したときに正となるコスト関数を作る。1 回(set)全体を
+# 見る形式(引数 2 つ)。組が重複したとき、後から出たほう(n が大きいほう)に 1 を
+# 付ける。上限 0 なら「組は 1 回内で 1 度きり」になる。回に属さない候補(n が無い)
+# は、組が一致する問題があれば正になるため、gen_zero_cost は「まだ使われていない
+# 組」の問題を選ぶことになる。
+def dup_cost(key)
+  lambda do |p, set|
+    set.count do |q|
+      q[:n] != p[:n] && key.call(q) == key.call(p) && (p[:n].nil? || q[:n] < p[:n])
+    end
+  end
+end
+
+COST_DUP_UNITS_PAIR = dup_cost(UNITS_PAIR)
+COST_DUP_LOW2_PAIR  = dup_cost(LOW2_PAIR)
+
+# 筆算ステージの制約セット。1 問内で 2 つの被演算数が似すぎるのを禁止(上限 0)
 # するのと、一の位の '0'/'1' は 1 回までが共通。十の位の条件だけがステージの
 # 進行につれて広がる。
 CONSTR_SIMILAR         = [[COST_SIMILAR_AB, 0]].freeze
 CONSTR_A_TENS_ONE      = (CONSTR_SIMILAR + [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ONE, 2]]).freeze
 CONSTR_A_TENS_ZERO_ONE = (CONSTR_SIMILAR + [[COST_UNITS_ZERO_ONE, 1], [COST_A_TENS_ZERO_ONE, 2]]).freeze
 CONSTR_TENS_ZERO_ONE   = (CONSTR_SIMILAR + [[COST_UNITS_ZERO_ONE, 1], [COST_TENS_ZERO_ONE, 2]]).freeze
+
+# 筆算-減算ステージの制約セット。減数の一の位の '1'、被減数の十の位の '1'、
+# 答えの一の位の '0'/'1' をそれぞれ 1 回までに抑え、(被減数の一の位, 減数の一の位)
+# の組が 1 回内で重複しないようにする。
+CONSTR_SUB_UNITS = (CONSTR_SIMILAR + [[COST_B_UNITS_ONE, 1], [COST_A_TENS_ONE, 1],
+                                      [COST_ANS_UNITS_ZERO_ONE, 1],
+                                      [COST_DUP_UNITS_PAIR, 0]]).freeze
+
+# 同・3 桁以上を扱うステージ用。減数の下 2 桁の '0' と答えの一の位の '0' を
+# それぞれ 1 回までに抑え、(被減数の下 2 桁, 減数の下 2 桁) の組の重複を禁じる。
+CONSTR_SUB_LOW2 = (CONSTR_SIMILAR + [[COST_B_LOW_ZERO, 1], [COST_ANS_UNITS_ZERO, 1],
+                                     [COST_DUP_LOW2_PAIR, 0]]).freeze
 
 # ---- ステージ定義 ------------------------------------------------------
 # entries: [[パターン候補配列, 問題数], ...]。候補が複数なら等確率で 1 つ選ぶ。
@@ -264,7 +422,18 @@ STAGES = {
   'S2-1-4' => { subtitle: 'たしざん筆算4', scale: :large, constraints: CONSTR_A_TENS_ZERO_ONE,
                 entries: [[%w[P2-1-4], 1], [%w[P2-1-5], 3], [%w[P2-1-6], 8]] },
   'S2-1-5' => { subtitle: 'たしざん筆算5', scale: :large, constraints: CONSTR_TENS_ZERO_ONE,
-                entries: [[%w[P2-1-7], 1], [%w[P2-1-8], 5], [%w[P2-1-9], 6]] }
+                entries: [[%w[P2-1-7], 1], [%w[P2-1-8], 5], [%w[P2-1-9], 6]] },
+  'S2-2-1' => { subtitle: 'ひきざん筆算1', scale: :large, constraints: CONSTR_SUB_UNITS,
+                entries: [[%w[P2-2-1], 12]] },
+  'S2-2-2' => { subtitle: 'ひきざん筆算2', scale: :large, constraints: CONSTR_SUB_UNITS,
+                entries: [[%w[P2-2-1], 4], [%w[P2-2-2], 8]] },
+  'S2-2-3' => { subtitle: 'ひきざん筆算3', scale: :large, constraints: CONSTR_SUB_LOW2,
+                entries: [[%w[P2-2-2], 1], [%w[P2-2-3], 2], [%w[P2-2-4], 2],
+                          [%w[P2-2-7], 3], [%w[P2-2-8], 4]] },
+  'S2-2-4' => { subtitle: 'ひきざん筆算4', scale: :large, constraints: CONSTR_SUB_LOW2,
+                entries: [[%w[P2-2-3], 1], [%w[P2-2-4], 1], [%w[P2-2-5], 1], [%w[P2-2-6], 1],
+                          [%w[P2-2-7], 1], [%w[P2-2-8], 2], [%w[P2-2-9], 2], [%w[P2-2-10], 2],
+                          [%w[P2-2-11], 1]] }
 }.freeze
 
 def stage_num(stage)
@@ -431,10 +600,22 @@ def spread_order(probs)
   ordered
 end
 
+# コスト関数を評価する。引数が 2 つのものは「1 回(set)全体を見て 1 問のコストを
+# 決める」形式(例: 回内での組の重複)なので、判定対象の回を渡す。
+def cost_of(cost, prob, set)
+  cost.arity == 2 ? cost.call(prob, set) : cost.call(prob)
+end
+
+# 1 回分の総コスト。
+def total_cost(set, cost)
+  set.sum { |p| cost_of(cost, p, set) }
+end
+
 # 同一パターン(pid)で全コスト関数が 0 になる問題を、可能な限り重複せず生成する。
 # 重複回避は gen_unique と同じ段階で緩める(コスト 0 の条件は最後まで維持)。
-def gen_zero_cost(pid, hist, costs)
-  zero = ->(prob) { costs.all? { |c| c.call(prob).zero? } }
+#   set : 差し替え先の判定に使う回(1 回全体を見るコスト関数のため。差し替え対象は除く)
+def gen_zero_cost(pid, hist, costs, set = [])
+  zero = ->(prob) { costs.all? { |c| cost_of(c, prob, set).zero? } }
   dup_levels(hist).each do |level|
     UNIQUE_ATTEMPTS.times do
       prob = gen_problem(pid)
@@ -449,17 +630,23 @@ end
 # 1 回内で cost の総和を max 以下に調整する。cost が正の問題を問題番号(n)の
 # 大きい順に、全コスト関数が 0 となる同一パターン問題へ差し替える。差し替え後の
 # 問題は全コストが 0 なので、繰り返すと総和は必ず減り、既に満たした制約も壊さない。
+# 「1 回全体を見るコスト関数」(引数 2 つ。回内での組の重複など)も同じ枠組みで扱う。
 #   all_costs : ステージの全コスト関数(差し替え先が全制約を満たすようにする)
 def adjust!(set, hist, cost, max, all_costs)
   loop do
-    break if set.sum { |p| cost.call(p) } <= max
+    total = total_cost(set, cost)
+    break if total <= max
 
-    target = set.select { |p| cost.call(p).positive? }.max_by { |p| p[:n] }
+    target = set.select { |p| cost_of(cost, p, set).positive? }.max_by { |p| p[:n] }
     break unless target
 
     unrecord(hist, target)
-    repl = gen_zero_cost(target[:pid], hist, all_costs).merge(n: target[:n])
-    set[set.index { |p| p[:n] == target[:n] }] = repl
+    idx = set.index { |p| p[:n] == target[:n] }
+    # 差し替え先の判定は対象を除いた回に対して行う(自分自身との重複を見ないため)。
+    repl = gen_zero_cost(target[:pid], hist, all_costs, set - [target]).merge(n: target[:n])
+    set[idx] = repl
+    # 差し替えても総コストが減らないなら候補が枯渇している。無限ループを避けて打ち切る。
+    break if total_cost(set, cost) >= total
   end
   set
 end

@@ -56,6 +56,19 @@
 - 3桁 + 最大3桁（繰り上がりあり）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-5.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-1-5-prev.pdf)
 
+### ひきざん（筆算）
+
+こちらも試しに作ってはみたものの…
+
+- 2桁 - 1桁 （繰り下がりなし）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-1-prev.pdf)
+- 2桁 - 1桁 （繰り下がりあり）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-2-prev.pdf)
+- 最大3桁 - 最大3桁 （十の位の繰り下がりあり）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-3.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-3-prev.pdf)
+- 最大3桁 - 最大3桁 （百・十の位の繰り下がりあり）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-4.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-4-prev.pdf)
+
 
 ## おわりに
 
