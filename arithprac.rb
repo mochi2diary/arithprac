@@ -57,12 +57,42 @@ OP_SYM_ZEN = { add: '＋', sub: '－', mul: '×' }.freeze
 # スケール(文字・解答欄サイズ)。値は pt / mm(単位はテンプレート側で付与)。
 #   inset_y : 問題行の行間(y)         valfs : 数値・等号のフォント
 #   opfs    : 演算子(+/×)のフォント   boxw/boxh : 解答欄の幅・高さ
+#   answ    : 解答ページの答えの欄幅(既定 ANSW_DEFAULT)
+#   anscols : 解答ページに横に並べる回数(既定 ANSCOLS_DEFAULT)
+#   ansrowgap : 解答ブロックの行間(pt。既定 ANSROWGAP_DEFAULT)
+# oneline: true のスケールは 1 列レイアウト(式を 1 セルに収める)。式のフォントは
+# valfs/opfs ではなく exprfs で指定する。小数のように桁数が伸びる問題に使う。
 SCALES = {
-  small:  { inset_y: 10, valfs: 13, opfs: 12, boxw: 26, boxh: 9 },
-  medium: { inset_y: 11, valfs: 14, opfs: 13, boxw: 26, boxh: 12 },
-  large:  { inset_y: 20, valfs: 16, opfs: 15, boxw: 26, boxh: 18 }
+  small:    { inset_y: 10, valfs: 13, opfs: 12, boxw: 26, boxh: 9 },
+  medium:   { inset_y: 11, valfs: 14, opfs: 13, boxw: 26, boxh: 12 },
+  large:    { inset_y: 20, valfs: 16, opfs: 15, boxw: 26, boxh: 18 },
+  # inset_y は A5 に 15 問を収めるため 3pt(CLAUDE.md の 10pt では 1 問 16mm となり
+  # 使える高さ約 170mm に 11 問しか入らない)。
+  # answ は小数の答えの分(最長 9 文字 = 15.9mm)。解答を横 6 回分並べるため 18mm。
+  # ansrowgap 3pt は解答ブロック 4 行(= 24 回分)を A4 縦 1 ページに収めるため
+  # (既定の 6pt では 4 行で 266mm となり、使える高さ約 265mm に収まらない)。
+  onesmall: { inset_y: 3, exprfs: 12, boxw: 70, boxh: 9, oneline: true,
+              answ: 18, anscols: 6, ansrowgap: 3 }
 }.freeze
 DEFAULT_SCALE = :small
+ANSW_DEFAULT      = 12  # 解答の欄幅(mm)。整数の答えは最大 4 桁(9801)で収まる。
+ANSCOLS_DEFAULT   = 4   # 解答ページに横に並べる回数
+ANSROWGAP_DEFAULT = 6   # 解答ブロックの行間(pt)
+
+# 1 列レイアウト(前半/後半に分けず、全問を上から下へ 1 列に並べる)か。
+def oneline?(scale)
+  SCALES[scale][:oneline] ? true : false
+end
+
+# 解答ページに横に並べる回数。1 列レイアウトは解答ブロックが細いため多く並べられる。
+def ans_cols(scale)
+  SCALES[scale][:anscols] || ANSCOLS_DEFAULT
+end
+
+# 解答ブロックの行間(pt)。1 列レイアウトはブロックが縦に長いため詰める。
+def ans_row_gap(scale)
+  SCALES[scale][:ansrowgap] || ANSROWGAP_DEFAULT
+end
 
 # 筆算のスケール。リージョン割り(--num)とは独立の設定。値は mm / pt。
 #   digw    : 数字 1 桁分のセルの幅          digfs    : 数字のフォント
@@ -154,6 +184,201 @@ def_pattern('P1-3-6', :mul) do
     s = "#{a}#{b}"
     break [a, b] if !s.include?('0') && !s.include?('1')
   end
+end
+
+# --- 暗算-小数乗算(P3-3-x)---
+# 小数は「浮動小数点表記」の (仮数部, 指数部) と等価な (m, k) の対で扱う。
+#   値 = m * 10**k。m は末尾に 0 を持たない整数(末尾の 0 は仮数部桁数を減らすため)。
+#   仮数部桁数 = m の桁数、指数部 = k + 仮数部桁数 - 1。
+#   例: 0.015 → m=15, k=-3(仮数部 1.5・仮数部桁数 2・指数部 -2)
+# 「ゼロ発生」= 積 m1*m2 の下位に出る 0。その桁数(ゼロ発生桁数)だけ仮数部桁数が減る。
+#   例: 0.15 × 0.6 → 15*6 = 90(ゼロ発生 1 桁)→ m=9, k=-2 → 0.09
+
+# 指数部の範囲。CLAUDE.md の「-1～-3」のように 0 に近い側から書けるようにする。
+def exp_range(from, to)
+  from <= to ? (from..to).to_a : (to..from).to_a
+end
+
+# 被乗数・乗数の仕様 [1以上か, 仮数部桁数, 指数部の範囲]。lt1 = 1未満、gte1 = 1以上。
+def lt1(digits, from, to)  = [false, digits, exp_range(from, to)]
+def gte1(digits, from, to) = [true,  digits, exp_range(from, to)]
+
+# 結果の仕様 [1以上か, 仮数部桁数, ゼロ発生桁数, 指数部の範囲]。
+def rlt1(digits, zeros, from, to)  = [false, digits, zeros, exp_range(from, to)]
+def rgte1(digits, zeros, from, to) = [true,  digits, zeros, exp_range(from, to)]
+
+# 仮数部桁数 digits の仮数(m)の候補。末尾の 0 は仮数部桁数を減らすため除く。
+# 桁数 1 では仮数 1(0.1 / 1 / 10 など)を除く(パターン共通の制約)。
+def dec_mantissas(digits)
+  digits == 1 ? (2..9).to_a : (11..99).reject { |m| (m % 10).zero? }
+end
+
+# 値(m * 10**k)。整数になる場合は Integer にして整数の問題と同じ扱いにする。
+def dec_value(m, k)
+  v = Rational(m) * Rational(10)**k
+  v.denominator == 1 ? v.numerator : v
+end
+
+# 固定小数点表記の文字列。整数はそのまま、小数は必要な桁数だけ書く(例: 0.000002)。
+# 積は Rational(4800/1) のように「整数値の Rational」になりうるので Rational に
+# 統一して判定する(Integer とみなせるなら小数点を付けない)。
+def dec_str(v)
+  r = Rational(v)
+  return r.numerator.to_s if r.denominator == 1
+
+  nd = 0
+  nd += 1 while (r * 10**nd).denominator != 1
+  s = (r * 10**nd).to_i.to_s.rjust(nd + 1, '0')
+  "#{s[0...-nd]}.#{s[-nd..]}"
+end
+
+# (m1,k1) × (m2,k2) の積を正規化して [m, k, ゼロ発生桁数] を返す。
+def dec_mul(m1, k1, m2, k2)
+  raw = m1 * m2
+  zeros = 0
+  zeros += 1 while (raw % 10**(zeros + 1)).zero?
+  [raw / 10**zeros, k1 + k2 + zeros, zeros]
+end
+
+# 被乗数・乗数の候補 [[m, k], ...]。
+def dec_operands(spec)
+  ge1, digits, exps = spec
+  unless exps.all? { |e| (e >= 0) == ge1 }
+    raise "内部エラー: 小数パターンの指数範囲 #{exps.inspect} が「1以上=#{ge1}」と矛盾します。"
+  end
+
+  exps.flat_map { |e| dec_mantissas(digits).map { |m| [m, e - (digits - 1)] } }
+end
+
+# パターンを満たす [被乗数, 乗数] の全候補。桁数・ゼロ発生桁数・指数の条件が厳しく
+# 棄却サンプリングでは効率が悪いため、候補を列挙して等確率で選ぶ。
+def dec_candidates(aspec, bspec, rspec)
+  r_ge1, r_digits, r_zeros, r_exps = rspec
+  dec_operands(aspec).product(dec_operands(bspec)).filter_map do |(m1, k1), (m2, k2)|
+    m, k, zeros = dec_mul(m1, k1, m2, k2)
+    next unless zeros == r_zeros && m.to_s.size == r_digits
+
+    exp = k + r_digits - 1
+    next unless r_exps.include?(exp) && (exp >= 0) == r_ge1
+
+    [dec_value(m1, k1), dec_value(m2, k2)]
+  end
+end
+
+# パターンごとの候補(初回使用時に列挙して覚える。全 75 パターンを起動時に
+# 列挙すると 0.3 秒ほどかかるため、使うパターンだけ列挙する)。
+DEC_CANDS = {}
+
+# 小数乗算パターンを定義する。
+#   a:, b: 被乗数・乗数の仕様(lt1 / gte1)
+#   r:     結果の仕様(rlt1 / rgte1)
+def def_dec_pattern(id, a:, b:, r:)
+  key = id.upcase
+  def_pattern(id, :mul) do
+    cands = (DEC_CANDS[key] ||= dec_candidates(a, b, r))
+    raise "内部エラー: パターン #{key} を満たす数値の組がありません。" if cands.empty?
+
+    cands.sample
+  end
+end
+
+# (1桁, 1桁, 1桁)
+def_dec_pattern('P3-3-1',  a: lt1(1, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(1, 0, -2, -6))
+def_dec_pattern('P3-3-2',  a: gte1(1, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(1, 0, 0, 3))
+def_dec_pattern('P3-3-3',  a: gte1(1, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(1, 0, -1, -3))
+def_dec_pattern('P3-3-4',  a: lt1(1, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(1, 0, 0, 3))
+def_dec_pattern('P3-3-5',  a: lt1(1, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(1, 0, -1, -3))
+def_dec_pattern('P3-3-6',  a: lt1(1, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(1, 1, -1, -5))
+def_dec_pattern('P3-3-7',  a: gte1(1, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(1, 1, 0, 4))
+def_dec_pattern('P3-3-8',  a: gte1(1, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(1, 1, -1, -2))
+def_dec_pattern('P3-3-9',  a: lt1(1, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(1, 1, 0, 4))
+def_dec_pattern('P3-3-10', a: lt1(1, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(1, 1, -1, -2))
+
+# (1桁, 1桁, 2桁)
+def_dec_pattern('P3-3-11', a: lt1(1, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(2, 0, -1, -5))
+def_dec_pattern('P3-3-12', a: gte1(1, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(2, 0, 0, 4))
+def_dec_pattern('P3-3-13', a: gte1(1, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(2, 0, -1, -2))
+def_dec_pattern('P3-3-14', a: lt1(1, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(2, 0, 0, 4))
+def_dec_pattern('P3-3-15', a: lt1(1, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(2, 0, -1, -2))
+
+# (1桁or2桁, 2桁or1桁, 2〜3桁・ゼロ発生なし)
+def_dec_pattern('P3-3-16', a: lt1(2, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(2, 0, -2, -6))
+def_dec_pattern('P3-3-17', a: lt1(2, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(3, 0, -1, -5))
+def_dec_pattern('P3-3-18', a: lt1(1, -1, -3),  b: lt1(2, -1, -3),  r: rlt1(2, 0, -2, -6))
+def_dec_pattern('P3-3-19', a: lt1(1, -1, -3),  b: lt1(2, -1, -3),  r: rlt1(3, 0, -1, -5))
+
+# 指数 0 かつ 仮数部桁数 2 は「1以上 && 小数点以下の桁あり」(例: 1.4)を意味する。
+def_dec_pattern('P3-3-20', a: gte1(2, 0, 0),   b: gte1(1, 0, 4),   r: rgte1(2, 0, 0, 4))
+def_dec_pattern('P3-3-21', a: gte1(1, 0, 4),   b: gte1(2, 0, 0),   r: rgte1(2, 0, 0, 4))
+def_dec_pattern('P3-3-22', a: gte1(2, 0, 0),   b: gte1(1, 0, 4),   r: rgte1(3, 0, 1, 5))
+def_dec_pattern('P3-3-23', a: gte1(1, 0, 4),   b: gte1(2, 0, 0),   r: rgte1(3, 0, 1, 5))
+
+def_dec_pattern('P3-3-24', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(2, 0, 0, 3))
+def_dec_pattern('P3-3-25', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rgte1(2, 0, 0, 3))
+def_dec_pattern('P3-3-26', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(3, 0, 0, 4))
+def_dec_pattern('P3-3-27', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rgte1(3, 0, 0, 4))
+
+def_dec_pattern('P3-3-28', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(2, 0, -1, -3))
+def_dec_pattern('P3-3-29', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rlt1(2, 0, -1, -3))
+def_dec_pattern('P3-3-30', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(3, 0, -1, -2))
+def_dec_pattern('P3-3-31', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rlt1(3, 0, -1, -2))
+
+def_dec_pattern('P3-3-32', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(2, 0, 0, 3))
+def_dec_pattern('P3-3-33', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rgte1(2, 0, 0, 3))
+def_dec_pattern('P3-3-34', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(3, 0, 0, 4))
+def_dec_pattern('P3-3-35', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rgte1(3, 0, 0, 4))
+
+def_dec_pattern('P3-3-36', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(2, 0, -1, -3))
+def_dec_pattern('P3-3-37', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rlt1(2, 0, -1, -3))
+def_dec_pattern('P3-3-38', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(3, 0, -1, -2))
+def_dec_pattern('P3-3-39', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rlt1(3, 0, -1, -2))
+
+# (1桁or2桁, 2桁or1桁, 1〜2桁・ゼロ発生あり)
+def_dec_pattern('P3-3-40', a: lt1(2, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(1, 1, -2, -6))
+def_dec_pattern('P3-3-41', a: lt1(2, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(2, 1, -1, -5))
+def_dec_pattern('P3-3-42', a: lt1(1, -1, -3),  b: lt1(2, -1, -3),  r: rlt1(1, 1, -2, -6))
+def_dec_pattern('P3-3-43', a: lt1(1, -1, -3),  b: lt1(2, -1, -3),  r: rlt1(2, 1, -1, -5))
+def_dec_pattern('P3-3-44', a: lt1(2, -1, -3),  b: lt1(1, -1, -3),  r: rlt1(1, 2, -1, -5))
+def_dec_pattern('P3-3-45', a: lt1(1, -1, -3),  b: lt1(2, -1, -3),  r: rlt1(1, 2, -1, -5))
+
+def_dec_pattern('P3-3-46', a: gte1(2, 0, 0),   b: gte1(1, 0, 4),   r: rgte1(1, 1, 0, 4))
+def_dec_pattern('P3-3-47', a: gte1(1, 0, 4),   b: gte1(2, 0, 0),   r: rgte1(1, 1, 0, 4))
+def_dec_pattern('P3-3-48', a: gte1(2, 0, 0),   b: gte1(1, 0, 4),   r: rgte1(1, 2, 1, 4))
+def_dec_pattern('P3-3-49', a: gte1(1, 0, 4),   b: gte1(2, 0, 0),   r: rgte1(1, 2, 1, 4))
+def_dec_pattern('P3-3-50', a: gte1(2, 0, 0),   b: gte1(1, 0, 4),   r: rgte1(2, 1, 1, 4))
+def_dec_pattern('P3-3-51', a: gte1(1, 0, 4),   b: gte1(2, 0, 0),   r: rgte1(2, 1, 1, 4))
+
+def_dec_pattern('P3-3-52', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(1, 1, 0, 3))
+def_dec_pattern('P3-3-53', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rgte1(1, 1, 0, 3))
+def_dec_pattern('P3-3-54', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(2, 1, 0, 4))
+def_dec_pattern('P3-3-55', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rgte1(2, 1, 0, 4))
+def_dec_pattern('P3-3-56', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rgte1(1, 2, 0, 4))
+def_dec_pattern('P3-3-57', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rgte1(1, 2, 0, 4))
+
+def_dec_pattern('P3-3-58', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(1, 1, -1, -3))
+def_dec_pattern('P3-3-59', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rlt1(1, 1, -1, -3))
+def_dec_pattern('P3-3-60', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(2, 1, -1, -2))
+def_dec_pattern('P3-3-61', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rlt1(2, 1, -1, -2))
+def_dec_pattern('P3-3-62', a: gte1(2, 0, 4),   b: lt1(1, -1, -3),  r: rlt1(1, 2, -1, -2))
+def_dec_pattern('P3-3-63', a: gte1(1, 0, 4),   b: lt1(2, -1, -3),  r: rlt1(1, 2, -1, -2))
+
+def_dec_pattern('P3-3-64', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(1, 1, 0, 3))
+def_dec_pattern('P3-3-65', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rgte1(1, 1, 0, 3))
+def_dec_pattern('P3-3-66', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(2, 1, 0, 4))
+def_dec_pattern('P3-3-67', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rgte1(2, 1, 0, 4))
+def_dec_pattern('P3-3-68', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rgte1(1, 2, 0, 4))
+def_dec_pattern('P3-3-69', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rgte1(1, 2, 0, 4))
+
+def_dec_pattern('P3-3-70', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(1, 1, -1, -3))
+def_dec_pattern('P3-3-71', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rlt1(1, 1, -1, -3))
+def_dec_pattern('P3-3-72', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(2, 1, -1, -2))
+def_dec_pattern('P3-3-73', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rlt1(2, 1, -1, -2))
+def_dec_pattern('P3-3-74', a: lt1(2, -1, -3),  b: gte1(1, 0, 4),   r: rlt1(1, 2, -1, -2))
+def_dec_pattern('P3-3-75', a: lt1(1, -1, -3),  b: gte1(2, 0, 4),   r: rlt1(1, 2, -1, -2))
+
+# 小数乗算のパターン名の配列。dec_pats(1..5) → %w[P3-3-1 P3-3-2 P3-3-3 P3-3-4 P3-3-5]
+def dec_pats(*nums)
+  nums.flat_map { |n| Array(n) }.map { |n| "P3-3-#{n}" }
 end
 
 # --- 筆算-加算(P2-1-x)---
@@ -422,6 +647,12 @@ STAGES = {
                 constraints: [[COST_MIXED_ONES, 1], [COST_A_TEN, 1], [COST_SUB_ZERO_TEN_ANS, 1]],
                 entries: [[%w[P1-1-3], 2], [%w[P1-1-6], 3],
                           [%w[P1-2-1], 2], [%w[P1-2-2], 3]] },
+  'S1-8-1' => { subtitle: '小数かけざん暗算1', scale: :onesmall,
+                entries: [[dec_pats(1..5), 1], [dec_pats(6..10), 1], [dec_pats(11..15), 1],
+                          [dec_pats(16..19), 1], [dec_pats(20..23), 1], [dec_pats(24..31), 1],
+                          [dec_pats(32..39), 1], [dec_pats(40..51), 1], [dec_pats(52..63), 1],
+                          [dec_pats(64..75), 1],
+                          [dec_pats(17, 19, 22, 23, 26, 27, 30, 31, 34, 35, 38, 39), 5]] },
   'S2-1-1' => { subtitle: 'たしざん筆算1', scale: :large, constraints: CONSTR_A_TENS_ONE,
                 entries: [[%w[P2-1-1], 12]] },
   'S2-1-2' => { subtitle: 'たしざん筆算2', scale: :large, constraints: CONSTR_A_TENS_ONE,
@@ -661,8 +892,9 @@ def adjust!(set, hist, cost, max, all_costs)
 end
 
 # 前半(左側)に並べる問題数。半分(奇数なら切り上げ)。
-def left_count(num)
-  (num + 1) / 2
+# 1 列レイアウトのスケールでは振り分けを行わないため、全問を「前半」とする。
+def left_count(num, scale = DEFAULT_SCALE)
+  oneline?(scale) ? num : (num + 1) / 2
 end
 
 # ステージ 1 回分を生成。重複回避の範囲は hist(出題履歴)が決める。
@@ -724,22 +956,38 @@ end
 
 # ---- Typst 生成 --------------------------------------------------------
 
+# レイアウトの種別。筆算は :column、暗算は 2 列(:mental)か 1 列(:oneline)。
+def prob_kind(form, scale)
+  return :column if form == :column
+
+  oneline?(scale) ? :oneline : :mental
+end
+
+# 1 列レイアウトの問題(式)。数値と演算子の間に空白を入れる(例: 0.4 × 0.6)。
+def prob_expr(prob)
+  "#{dec_str(prob[:a])} #{OP_SYM[prob[:op]]} #{dec_str(prob[:b])}"
+end
+
 # 問題テーブルのセル配列(Typst の array of dict リテラル)。
-# 筆算(:column)は数字・演算子とも全角で渡す。暗算(:mental)は半角のまま
-# (1 つのテキストランで組むため、全角にすると字送りが valw を超える)。
-def typ_problems(items, form = :mental)
+# 筆算(:column)は数字・演算子とも全角で渡す。暗算(:mental / :oneline)は半角のまま
+# (1 つのテキストランで組むため、全角にすると字送りが欄幅を超える)。
+# 数値は Ruby 側で文字列にしてから渡す(小数を Typst の float にすると表記が変わる)。
+def typ_problems(items, kind = :mental)
   '(' + items.map { |p|
-    if form == :column
+    case kind
+    when :column
       %{(n: "#{circled(p[:n])}", a: "#{zen_digits(p[:a])}", b: "#{zen_digits(p[:b])}", op: "#{OP_SYM_ZEN[p[:op]]}")}
+    when :oneline
+      %{(n: "#{circled(p[:n])}", expr: "#{prob_expr(p)}")}
     else
-      %{(n: "#{circled(p[:n])}", a: #{p[:a]}, b: #{p[:b]}, op: "#{OP_SYM[p[:op]]}")}
+      %{(n: "#{circled(p[:n])}", a: "#{dec_str(p[:a])}", b: "#{dec_str(p[:b])}", op: "#{OP_SYM[p[:op]]}")}
     end
   }.join(', ') + ',)'
 end
 
 # 解答テーブルのセル配列
 def typ_answers(items)
-  '(' + items.map { |p| %{(n: "#{circled(p[:n])}", p: #{p[:ans]})} }.join(', ') + ',)'
+  '(' + items.map { |p| %{(n: "#{circled(p[:n])}", p: "#{dec_str(p[:ans])}")} }.join(', ') + ',)'
 end
 
 # 暗算・筆算で共通の前文(フォント・見出し・切り取り線・A4 横 1 ページの組み方)。
@@ -786,8 +1034,56 @@ def typ_preamble(title_text, stage_name, form, tag)
   TYP
 end
 
-# 問題(暗算)の定義。1 問 = 6 セルの行、A5 1 枚は前半/後半の 2 列。
+# 問題(暗算)の定義。スケールにより 2 列レイアウトか 1 列レイアウトを出力する。
 def typ_mental_defs(scale)
+  oneline?(scale) ? typ_oneline_defs(scale) : typ_twocol_defs(scale)
+end
+
+# 問題(暗算・1 列)の定義。1 問 = 4 セルの行(番号・式・等号・解答欄)。
+# 式は項や演算子ごとにセルへ割り付けず、1 つの文字列として 1 セルに収める
+# (項数・桁数・演算子が問題ごとに異なってよいフリーフォーマット)。
+def typ_oneline_defs(scale)
+  s = SCALES[scale]
+  <<~TYP
+
+    // --- 寸法(スケール: #{scale} / 1 列レイアウト) ---
+    #let boxw  = #{s[:boxw]}mm   // 解答欄(横長の□)の幅。1 列ぶんの幅を活かす。
+    #let boxh  = #{s[:boxh]}mm    // 解答欄の高さ(手書き用に本文より少し大きめ)
+    #let numw  = 6mm    // 問題番号の欄幅
+    #let numgap = 5mm   // 問題番号と式のあいだの空き
+    #let eqw   = 5mm    // 等号の欄幅
+    #let exprfs = #{s[:exprfs]}pt  // 式・等号のフォントサイズ
+
+    #let ansbox = box(width: boxw, height: boxh, stroke: 0.7pt, radius: 1pt)
+
+    // 1 問分の行(4 セル)。式は左揃え(桁数が伸びても左端がそろう)。
+    #let probrow(n, expr) = (
+      align(right)[#text(size: 12pt)[#n]],
+      align(left)[#h(numgap)#text(size: exprfs)[#expr]],
+      align(center)[#text(size: exprfs)[=]],
+      align(left + horizon)[#ansbox],
+    )
+
+    // 式の列を 1fr にして残り幅を吸収させ、等号と解答欄を右端にそろえる。
+    // 式は左揃えのままなので、行ごとに左端・等号・解答欄の位置がそろう。
+    #let probtable(items) = table(
+      columns: (numw, 1fr, eqw, auto),
+      stroke: none,
+      align: horizon,
+      inset: (x: 2pt, y: #{s[:inset_y]}pt),
+      ..items.map(it => probrow(it.n, it.expr)).flatten()
+    )
+
+    // A5 1 枚分(1 回分)。全問を上から下へ 1 列に並べる(列間の点線は引かない)。
+    #let probset(title, items) = block(width: 100%, height: 100%, [
+      #probhead(title)
+      #grid(columns: (1fr), align: top, probtable(items))
+    ])
+  TYP
+end
+
+# 問題(暗算・2 列)の定義。1 問 = 6 セルの行、A5 1 枚は前半/後半の 2 列。
+def typ_twocol_defs(scale)
   s = SCALES[scale]
   <<~TYP
 
@@ -805,9 +1101,9 @@ def typ_mental_defs(scale)
     // 1 問分の行(6 セル)。数値は右揃えで右端をそろえる。
     #let probrow(n, a, b, op) = (
       align(right)[#text(size: 12pt)[#n]],
-      align(right)[#text(size: valfs)[#(str(a))]],
+      align(right)[#text(size: valfs)[#a]],
       align(center)[#text(size: opfs)[#op]],
-      align(right)[#text(size: valfs)[#(str(b))]],
+      align(right)[#text(size: valfs)[#b]],
       align(center)[#text(size: valfs)[=]],
       align(left + horizon)[#ansbox],
     )
@@ -906,7 +1202,7 @@ def typ_column_defs(scale, num)
 end
 
 # 解答(A4 縦)。暗算・筆算で共通。
-def typ_answer_defs
+def typ_answer_defs(scale)
   <<~TYP
 
     // 解答 1 問分(番号・答えの 2 セル)。番号は左揃え、答えは右揃え。
@@ -914,12 +1210,12 @@ def typ_answer_defs
     // すべて等しく(#anspad + セル内側 2pt)なる。
     #let anscell(it) = (
       align(left)[#text(size: ansfs)[#it.n]],
-      align(right)[#text(size: ansfs)[#(str(it.p))]],
+      align(right)[#text(size: ansfs)[#it.p]],
     )
 
     // 解答セルの列幅(4 回分を横に並べるため詰めている)。
     #let ansnumw = 6mm   // 番号(丸数字)の欄幅
-    #let answ    = 12mm  // 答えの欄幅(最大 4 桁 9801 でも右揃えで収まる)
+    #let answ    = #{SCALES[scale][:answ] || ANSW_DEFAULT}mm  // 答えの欄幅
 
     // 解答の 1 列。番号(左揃え)・答え(右揃え)。
     #let ansminicol(items) = table(
@@ -930,49 +1226,58 @@ def typ_answer_defs
     #let anspad = 2mm
 
     // 解答 1 ブロック(第N回)。問題と同様に 前半 / 後半 の縦 2 列で表示。
+    // 問題が 1 列レイアウトのときは leftn が全問数になるため、後半の列と
+    // 区切りの点線を出さずに 1 列で表示する。
     // ブロック幅は内容に合わせて縮める(右側の余白を作らない)。
     #let ansblock(title, items, leftn) = block(inset: (x: anspad, y: 6pt), radius: 2pt,
       stroke: 0.5pt, breakable: false, [
         #text(weight: "bold", size: 11pt)[#title]
         #v(3pt)
-        #grid(columns: (auto, anspad, anspad, auto), align: top,
-          grid.vline(x: 2, stroke: (paint: luma(140), thickness: 0.6pt, dash: "dotted")),
-          ansminicol(items.slice(0, leftn)), [], [], ansminicol(items.slice(leftn)))
+        #if leftn >= items.len() [
+          #ansminicol(items)
+        ] else [
+          #grid(columns: (auto, anspad, anspad, auto), align: top,
+            grid.vline(x: 2, stroke: (paint: luma(140), thickness: 0.6pt, dash: "dotted")),
+            ansminicol(items.slice(0, leftn)), [], [], ansminicol(items.slice(leftn)))
+        ]
       ])
   TYP
 end
 
 # 問題ページ(A4 横。2 回分ずつ)。
-#   暗算: 前半 ln 問を左、残りを右に並べる。 筆算: 1 回分をそのまま渡す。
-def typ_problem_pages(sets, num, form)
-  ln = left_count(num)
+#   暗算(2 列): 前半 ln 問を左、残りを右に並べる。
+#   暗算(1 列)・筆算: 1 回分をそのまま渡す。
+def typ_problem_pages(sets, num, kind, scale)
+  ln = left_count(num, scale)
+  probset_args = lambda do |set, n|
+    if kind == :mental
+      "\"第#{n}回\", #{typ_problems(set[0...ln])}, #{typ_problems(set[ln...num])}"
+    else
+      "\"第#{n}回\", #{typ_problems(set, kind)}"
+    end
+  end
   out = +''
   (0...sets.size).step(2) do |i|
-    a = sets[i]
-    b = sets[i + 1]
-    args = if form == :column
-             ["\"第#{i + 1}回\", #{typ_problems(a, form)}", "\"第#{i + 2}回\", #{typ_problems(b, form)}"]
-           else
-             ["\"第#{i + 1}回\", #{typ_problems(a[0...ln])}, #{typ_problems(a[ln...num])}",
-              "\"第#{i + 2}回\", #{typ_problems(b[0...ln])}, #{typ_problems(b[ln...num])}"]
-           end
-    out << %{\n#sheetpair(\n  probset(#{args[0]}),\n  probset(#{args[1]}),\n)\n}
+    a = probset_args.call(sets[i], i + 1)
+    b = probset_args.call(sets[i + 1], i + 2)
+    out << %{\n#sheetpair(\n  probset(#{a}),\n  probset(#{b}),\n)\n}
     out << "#pagebreak()\n" if i + 2 < sets.size
   end
   out
 end
 
 def build_typst(sets, num, title_text, stage_name, scale, form, tag)
+  kind = prob_kind(form, scale)
   out = +''
   out << typ_preamble(title_text, stage_name, form, tag)
   out << (form == :column ? typ_column_defs(scale, num) : typ_mental_defs(scale))
-  out << typ_answer_defs
+  out << typ_answer_defs(scale)
   out << <<~TYP
 
     // ================= 問題(A4 横) =================
     #set page(paper: "a4", flipped: true, margin: (x: 6mm, y: 8mm), background: tagprob)
   TYP
-  out << typ_problem_pages(sets, num, form)
+  out << typ_problem_pages(sets, num, kind, scale)
 
   # ================= 解答(A4 縦) =================
   out << <<~TYP
@@ -980,10 +1285,11 @@ def build_typst(sets, num, title_text, stage_name, scale, form, tag)
     #set page(flipped: false, margin: (x: 10mm, y: 10mm), background: tagans)
     #align(center)[#text(size: 16pt, weight: "bold")[#{title_text}#if stagename != "" [ #stagename] 解答]]
     #v(6pt)
-    #grid(columns: (1fr, 1fr, 1fr, 1fr), column-gutter: 3mm, row-gutter: 6pt,
+    #grid(columns: (#{(['1fr'] * ans_cols(scale)).join(', ')}), column-gutter: 3mm,
+          row-gutter: #{ans_row_gap(scale)}pt,
   TYP
 
-  ln = left_count(num)
+  ln = left_count(num, scale)
   sets.each_with_index do |s, i|
     out << %{  ansblock("第#{i + 1}回", #{typ_answers(s)}, #{ln}),\n}
   end
@@ -1015,7 +1321,9 @@ parser = OptionParser.new do |o|
        "筆算: #{REGION_SHAPES.keys.join('・')} のいずれか, 既定 #{DEFAULT_REGIONS})") { |v| options[:num] = v }
   o.on('--pattern P', String, 'パターン名(例: P1-1-1)。複数指定可。--stage を無視。') { |v| options[:patterns] << v }
   o.on('--ratio R', Rational, 'パターンの混合比率(--pattern と同数)。合計 1 に正規化。') { |v| options[:ratios] << v }
-  o.on('--scale S', String, '文字・解答欄サイズ small/medium/large(既定 small)。--stage 指定時は無視。') { |v| options[:scale] = v }
+  o.on('--scale S', String,
+       '文字・解答欄サイズ small/medium/large/onesmall(既定 small)。' \
+       'onesmall は暗算のみの 1 列レイアウト。--stage 指定時は無視。') { |v| options[:scale] = v }
   o.on('-o O', '--output O', String, "出力ファイル名(.pdf)。不正な拡張子なら #{BASENAME}.pdf を使用。") { |v| options[:output] = v }
   o.on('--seed S', Integer, '乱数シード(再現用)') { |v| options[:seed] = v }
   o.on('-h', '--help', 'この使い方を表示') { puts o; exit }
@@ -1044,7 +1352,7 @@ scale_opt = nil
 if options[:scale]
   scale_opt = options[:scale].downcase.to_sym
   unless SCALES.key?(scale_opt)
-    abort "エラー: --scale は small/medium/large のいずれかを指定してください(指定: #{options[:scale]})。"
+    abort "エラー: --scale は #{SCALES.keys.join('/')} のいずれかを指定してください(指定: #{options[:scale]})。"
   end
 end
 
@@ -1116,6 +1424,10 @@ elsif !options[:patterns].empty?
   end
 
   scale = scale_opt || DEFAULT_SCALE
+  if form == :column && oneline?(scale)
+    abort "エラー: --scale #{scale}(1 列レイアウト)は暗算(P1-x-x/P3-x-x)のみで使用できます。"
+  end
+
   hist = new_history(variety: form == :column)
 sets = Array.new(sets_count) { make_pattern_set(patterns, ratios, num, hist) }
   puts "パターン #{patterns.join(', ')}: #{sets_count} 回・1 回 #{num} 問(form=#{form}, scale=#{scale})。"

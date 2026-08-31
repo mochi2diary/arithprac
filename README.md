@@ -32,6 +32,16 @@
 - 結果が10以下の引き算（繰り下がりあり）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-2-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-2-2-prev.pdf)
 
+### たしひき混合（暗算）
+
+- 1桁 + 1桁（繰り上がりあり）／結果が10以下の引き算（繰り下がりあり）
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-5-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-5-1-prev.pdf)
+
+### 小数かけざん（暗算）
+
+- 最大2桁 x 1桁
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-3-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-3-1-prev.pdf)
+
 ### かけざん（暗算）
 
 - 九九 （2x2 .. 9x9）順番通り
