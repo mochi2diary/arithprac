@@ -315,8 +315,13 @@ end
 # adjust! がコストの正の問題を差し替えて総コストを調整する(下記参照)。
 COST_ONES     = ->(p) { ones_in(p) }              # 被演算数(a,b)に現れる '1' の個数
 COST_B_ONES   = ->(p) { p[:b].to_s.count('1') }   # 減数(b)に現れる '1' の個数
+# 加減混在ステージ用。加算なら被加数・加数、減算なら減数(b)に現れる '1' の個数。
+# 被減数は別途 COST_A_TEN で 10 の出現を抑えるため、ここでは数えない。
+COST_MIXED_ONES = ->(p) { p[:op] == :add ? ones_in(p) : p[:b].to_s.count('1') }
 COST_ZERO_ANS = ->(p) { p[:ans].zero? ? 1 : 0 }   # 答えが 0 なら 1
 COST_ZERO_TEN_ANS = ->(p) { [0, 10].include?(p[:ans]) ? 1 : 0 } # 答えが 0 または 10 なら 1
+# 加減混在ステージ用。ひきざんで答えが 0 または 10 なら 1(たしざんは数えない)。
+COST_SUB_ZERO_TEN_ANS = ->(p) { p[:op] == :sub && [0, 10].include?(p[:ans]) ? 1 : 0 }
 COST_A_TEN    = ->(p) { p[:a] == 10 ? 1 : 0 }     # 被減数(a)が 10 なら 1
 # 第 1 項・第 2 項(被加数と加数 / 被減数と減数)の一の位に現れる '0' と '1' の個数(0〜2)
 COST_UNITS_ZERO_ONE = ->(p) { [p[:a] % 10, p[:b] % 10].count { |d| [0, 1].include?(d) } }
@@ -413,6 +418,10 @@ STAGES = {
   'S1-3-4' => { subtitle: 'かけざん暗算4', scale: :small, entries: [[%w[P1-3-3], 20]] },
   'S1-3-5' => { subtitle: 'かけざん暗算5', scale: :small, entries: [[%w[P1-3-4], 20]] },
   'S1-3-6' => { subtitle: 'かけざん暗算6', scale: :small, entries: [[%w[P1-3-5], 10], [%w[P1-3-6], 10]] },
+  'S1-5-1' => { subtitle: 'たしひき暗算1', scale: :large,
+                constraints: [[COST_MIXED_ONES, 1], [COST_A_TEN, 1], [COST_SUB_ZERO_TEN_ANS, 1]],
+                entries: [[%w[P1-1-3], 2], [%w[P1-1-6], 3],
+                          [%w[P1-2-1], 2], [%w[P1-2-2], 3]] },
   'S2-1-1' => { subtitle: 'たしざん筆算1', scale: :large, constraints: CONSTR_A_TENS_ONE,
                 entries: [[%w[P2-1-1], 12]] },
   'S2-1-2' => { subtitle: 'たしざん筆算2', scale: :large, constraints: CONSTR_A_TENS_ONE,
