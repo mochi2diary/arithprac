@@ -40,7 +40,7 @@
 ### 小数かけざん（暗算）
 
 - 最大2桁 x 1桁
-    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-3-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-3-1-prev.pdf)
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-8-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-8-1-prev.pdf)
 
 ### かけざん（暗算）
 
