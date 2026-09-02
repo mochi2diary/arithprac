@@ -146,6 +146,11 @@ CLOCK_LAYOUT = {
   unitgap: 3,    # 解答欄の下端から「じ」「ふん」の下端までの距離
   fun_dx: 3,     # 「ふん」の右端を角丸の始まりから右へずらす量
   ji_dx: 2,      # 「ふん」があるとき「じ」の右端を解答欄の中央から左へずらす量
+  itis_dx: 3,    # (英語)「It is」の左端を角丸の終わりから左へずらす量
+  period_dx: 3,  # (英語)「．」の右端を角丸の始まりから右へずらす量
+  period_fs: 12, # (英語)「．」の文字サイズ(pt)。「It is」は unitfs を使う。
+  line_gap: 2,   # (英語)下線の両端と「It is」「．」のあいだの空き
+  en_lift: 5,    # (英語)「It is」・下線・「．」の全体を上へずらす量
   rpad_x: 3,     # リージョン内の左右の余白
   rpad_y: 3      # 同・上下の余白
 }.freeze
@@ -156,6 +161,239 @@ CLOCK_LAYOUT = {
 CLOCK_ANSW    = 36  # 答えの欄幅(mm)
 CLOCK_ANSNUMW = 5   # 番号(丸数字)の欄幅(mm)。丸数字 3.5mm + セル内側 2pt × 2。
 CLOCK_ANSCOLS = 4   # 解答ページに横に並べる回数
+
+# ---- 多言語対応 --------------------------------------------------------
+# 言語依存の文字列(画面と紙面に出るもの)は、すべてこの節の TEXTS に集める。
+# コード中の他の場所には日本語・英語を直接書かない。
+# ソースおよび生成される .typ 内のコメントは、利用者向けの出力ではないため
+# 言語によらず日本語のままとする。
+LANGS        = %i[ja en].freeze
+DEFAULT_LANG = :ja
+EN_FONT      = JP_FONT  # 英語のフォント(現時点では日本語と同じものを使う)
+FONTS        = { ja: JP_FONT, en: EN_FONT }.freeze
+
+# 実行時に選ばれている言語。--lang で書き換える(既定は DEFAULT_LANG)。
+CURRENT_LANG = { lang: DEFAULT_LANG }
+
+# 英語の数詞(0〜59)。時計(よみ)の解答を数字ではなく英単語で書くために使う。
+EN_ONES = %w[zero one two three four five six seven eight nine ten eleven twelve thirteen
+             fourteen fifteen sixteen seventeen eighteen nineteen].freeze
+EN_TENS = %w[twenty thirty forty fifty].freeze
+EN_NUMBERS = (0..59).map do |n|
+  next EN_ONES[n] if n < 20
+
+  tens = EN_TENS[n / 10 - 2]
+  (n % 10).zero? ? tens : "#{tens}-#{EN_ONES[n % 10]}"
+end.freeze
+
+def lang = CURRENT_LANG[:lang]
+
+def lang!(sym)
+  CURRENT_LANG[:lang] = sym
+end
+
+# 本文・時計盤の数字に使うフォント。
+def body_font = FONTS[lang]
+
+# 言語依存の文字列を取り出す。%{...} を含むものは名前付き引数で埋める。
+def t(key, **args)
+  s = TEXTS.fetch(lang).fetch(key)
+  args.empty? ? s : format(s, **args)
+end
+
+# 時計(よみ)の解答に出す数字。英語は数字ではなく英単語で書く(:numbers が有れば使う)。
+def clock_num(n)
+  words = TEXTS.fetch(lang)[:numbers]
+  words ? words[n] : n.to_s
+end
+
+# 同じく「ふん」の数。1 桁のふんは英語では "oh" を付けて読む(例: three oh five)。
+def clock_min_num(m)
+  fmt = TEXTS.fetch(lang)[:clock_min_oh]
+  s = clock_num(m)
+  fmt && m < 10 ? format(fmt, m: s) : s
+end
+
+# ステージのサブタイトル(--stage-list の一覧と紙面の見出しに使う)。
+def stage_subtitle(id)
+  TEXTS.fetch(lang)[:subtitles][id.upcase]
+end
+
+TEXTS = {
+  ja: {
+    # --- 紙面(PDF)---
+    title_mental: '暗算マスター',
+    title_column: '筆算マスター',
+    title_clock:  '時計マスター',
+    name:         '名前',
+    score:        '得点',
+    answers:      '解答',
+    ans_head_sep: ' ',   # 解答ページの見出しで大見出し・ステージ名・「解答」を区切る字
+    set_no:       '第%{n}回',
+    # 時計(よみ)の解答欄に出す字と、解答の文字列。
+    # 「0 じ」は「12 じ」とも読めるため併記する。
+    clock_hour_unit: 'じ',
+    clock_min_unit:  'ふん',
+    clock_h0:        '0 じ(12 じ)',  # 0 時の「じ」の部分
+    clock_h:         '%{h} じ',      # 「じ」の部分(0 時以外)
+    clock_only:      '%{h}',         # 「ふん」を問わないとき
+    clock_hm:        '%{h} %{m} ふん',
+    numbers:         nil,            # 数字はそのまま書く(英単語にしない)
+    clock_min_oh:    nil,            # 1 桁のふんも数字をそのまま書く
+    # --- ステージのサブタイトル ---
+    subtitles: {
+      'S1-1-1' => 'たしざん暗算1', 'S1-1-2' => 'たしざん暗算2', 'S1-1-3' => 'たしざん暗算3',
+      'S1-1-4' => 'たしざん暗算4', 'S1-1-5' => 'たしざん暗算5',
+      'S1-2-1' => 'ひきざん暗算1', 'S1-2-2' => 'ひきざん暗算2',
+      'S1-3-1' => 'かけざん暗算1', 'S1-3-2' => 'かけざん暗算2', 'S1-3-3' => 'かけざん暗算3',
+      'S1-3-4' => 'かけざん暗算4', 'S1-3-5' => 'かけざん暗算5', 'S1-3-6' => 'かけざん暗算6',
+      'S1-5-1' => 'たしひき暗算1',
+      'S1-8-1' => '小数かけざん暗算1',
+      'S2-1-1' => 'たしざん筆算1', 'S2-1-2' => 'たしざん筆算2', 'S2-1-3' => 'たしざん筆算3',
+      'S2-1-4' => 'たしざん筆算4', 'S2-1-5' => 'たしざん筆算5',
+      'S2-2-1' => 'ひきざん筆算1', 'S2-2-2' => 'ひきざん筆算2', 'S2-2-3' => 'ひきざん筆算3',
+      'S2-2-4' => 'ひきざん筆算4',
+      'S3-1-1' => 'よみ1', 'S3-1-2' => 'よみ2', 'S3-1-3' => 'よみ3', 'S3-1-4' => 'よみ4'
+    }.freeze,
+    # --- 使い方(--help)---
+    usage:          '使い方: ruby arithprac.rb [options]',
+    opt_stage:      'ステージ名(例: S1-1-1)。--num/--pattern/--ratio を無視。',
+    opt_pages:      "問題のページ数(1 ページ = 2 回分, 既定 #{DEFAULT_PAGES})",
+    opt_stage_list: 'ステージ名とサブタイトルの一覧を表示して終了',
+    opt_num:        "1 回あたりの問題数(暗算: #{MIN_PROBLEMS}〜#{MAX_PROBLEMS}, 既定 #{DEFAULT_PROBLEMS} / " \
+                    "筆算・時計: #{REGION_SHAPES.keys.join('・')} のいずれか, 既定 #{DEFAULT_REGIONS}・" \
+                    "#{DEFAULT_CLOCK_REGIONS})",
+    opt_pattern:    'パターン名(例: P1-1-1)。複数指定可。--stage を無視。',
+    opt_ratio:      'パターンの混合比率(--pattern と同数)。合計 1 に正規化。',
+    opt_scale:      '文字・解答欄サイズ small/medium/large/onesmall(既定 small)。' \
+                    'onesmall は暗算のみの 1 列レイアウト。時計では使わない。--stage 指定時は無視。',
+    opt_output:     "出力ファイル名(.pdf)。不正な拡張子なら #{BASENAME}.pdf を使用。",
+    opt_seed:       '乱数シード(再現用)',
+    opt_lang:       "使用言語 #{LANGS.join('/')}(既定 #{DEFAULT_LANG})",
+    opt_help:       'この使い方を表示',
+    # --- 実行時のメッセージ ---
+    seed_info:      'seed = %{seed}%{auto} で生成します。ページタグ: %{tag}',
+    seed_auto:      '(自動生成)',
+    info_kuku:      'ステージ %{key}(%{sub}): 九九固定 4 回・1 回 16 問(scale=%{scale}, CLI 指定は無視)。',
+    info_stage:     'ステージ %{key}(%{sub}): %{pages} ページ・%{sets} 回・1 回 %{num} 問(%{desc})。',
+    info_pattern:   'パターン %{list}: %{sets} 回・1 回 %{num} 問(%{desc})。',
+    info_typ:       'Typst ファイルを生成: %{path}',
+    info_pdf:       'PDF を生成: %{path}%{pages}',
+    pages_suffix:   ' (全%{n}ページ)',
+    warn_stage_opts:  '警告: --stage 指定時は --pattern/--ratio/--num は無視されます。',
+    warn_stage_scale: '警告: --stage 指定時は --scale は無視されます(ステージ固有のスケールを使用)。',
+    warn_clock_scale: '警告: 時計(P4-x-x)では --scale は使いません(時計盤はリージョンに合わせた大きさになります)。',
+    warn_output_ext:  '警告: 出力拡張子が .pdf ではないため %{name} を使用します。',
+    err_lang:         'エラー: --lang は %{list} のいずれかを指定してください(指定: %{v})。',
+    err_pages:        'エラー: --pages は 1 以上を指定してください(指定: %{v})。',
+    err_scale:        'エラー: --scale は %{list} のいずれかを指定してください(指定: %{v})。',
+    err_scale_oneline: 'エラー: --scale %{scale}(1 列レイアウト)は暗算(P1-x-x/P3-x-x)のみで使用できます。',
+    err_stage:        "エラー: ステージ '%{v}' は存在しません(一覧は --stage-list)。",
+    err_pattern_unknown: 'エラー: パターンが存在しません: %{list}',
+    err_pattern_forms:   'エラー: 暗算(P1-x-x/P3-x-x)・筆算(P2-x-x)・時計(P4-x-x)のパターンは同時に指定できません。',
+    err_num_mental:   'エラー: 問題数は %{min}〜%{max} の範囲で指定してください(指定: %{v})。',
+    err_num_region:   'エラー: 筆算・時計の問題数は %{shapes} のいずれかを指定してください(指定: %{v})。',
+    err_ratio_count:  'エラー: --ratio は --pattern と同じ数だけ指定してください。',
+    err_ratio_negative: 'エラー: --ratio に負の値は指定できません。',
+    err_ratio_zero:   'エラー: --ratio の合計が 0 です。',
+    err_no_mode:      'エラー: --stage または --pattern を指定してください(一覧は --stage-list)。',
+    err_typst:        'typst のコンパイルに失敗しました。上の出力を確認してください。',
+    err_stage_region: '内部エラー: ステージ %{key} の問題数(%{num})はリージョンに分割できません(%{shapes})。',
+    err_dec_exp:      '内部エラー: 小数パターンの指数範囲 %{exps} が「1以上=%{ge1}」と矛盾します。',
+    err_dec_empty:    '内部エラー: パターン %{key} を満たす数値の組がありません。'
+  },
+  en: {
+    # --- 紙面(PDF)---
+    title_mental: 'Mental Math Master',
+    title_column: 'Written Calc Master',
+    title_clock:  'Clock Master',
+    name:         'Name',
+    score:        'Pts',
+    answers:      'Answers',
+    ans_head_sep: ' - ', # 語の切れ目が分かるようにハイフンで区切る
+    set_no:       'Set %{n}',
+    # 時計(よみ)の解答は数字ではなく英単語で書く(例: 3 時 15 分 → three fifteen)。
+    # 解答欄には「It is」(左)と「．」(右)を置き、単位は書かない。
+    # 英語には「0 時」の読みが無いため、0 じ は 12 として書く(併記もしない)。
+    clock_itis:      'It is',
+    clock_period:    '．',
+    clock_h0:        'twelve',       # 0 時の「じ」の部分
+    clock_h:         '%{h}',         # 「じ」の部分(0 時以外)
+    clock_only:      "%{h} o'clock", # 「ふん」を問わないとき
+    clock_hm:        '%{h} %{m}',
+    numbers:         EN_NUMBERS,     # 数字は英単語で書く
+    clock_min_oh:    'oh %{m}',      # 1 桁のふん(例: 3 じ 5 ふん → three oh five)
+    # --- ステージのサブタイトル ---
+    # 紙面の見出し行に収める必要があるため、長くなりすぎないようにする。
+    subtitles: {
+      'S1-1-1' => 'Mental Add 1', 'S1-1-2' => 'Mental Add 2', 'S1-1-3' => 'Mental Add 3',
+      'S1-1-4' => 'Mental Add 4', 'S1-1-5' => 'Mental Add 5',
+      'S1-2-1' => 'Mental Sub 1', 'S1-2-2' => 'Mental Sub 2',
+      'S1-3-1' => 'Mental Mul 1', 'S1-3-2' => 'Mental Mul 2', 'S1-3-3' => 'Mental Mul 3',
+      'S1-3-4' => 'Mental Mul 4', 'S1-3-5' => 'Mental Mul 5', 'S1-3-6' => 'Mental Mul 6',
+      'S1-5-1' => 'Mental Add & Sub 1',
+      'S1-8-1' => 'Mental Decimal Mul 1',
+      'S2-1-1' => 'Column Add 1', 'S2-1-2' => 'Column Add 2', 'S2-1-3' => 'Column Add 3',
+      'S2-1-4' => 'Column Add 4', 'S2-1-5' => 'Column Add 5',
+      'S2-2-1' => 'Column Sub 1', 'S2-2-2' => 'Column Sub 2', 'S2-2-3' => 'Column Sub 3',
+      'S2-2-4' => 'Column Sub 4',
+      'S3-1-1' => 'Clock Reading 1', 'S3-1-2' => 'Clock Reading 2',
+      'S3-1-3' => 'Clock Reading 3', 'S3-1-4' => 'Clock Reading 4'
+    }.freeze,
+    # --- 使い方(--help)---
+    usage:          'Usage: ruby arithprac.rb [options]',
+    opt_stage:      'Stage name (e.g. S1-1-1). Ignores --num/--pattern/--ratio.',
+    opt_pages:      "Pages of problems (1 page = 2 sets, default #{DEFAULT_PAGES})",
+    opt_stage_list: 'List stage names with their subtitles and exit',
+    opt_num:        "Problems per set (mental: #{MIN_PROBLEMS}-#{MAX_PROBLEMS}, default #{DEFAULT_PROBLEMS} / " \
+                    "column and clock: one of #{REGION_SHAPES.keys.join(', ')}, default #{DEFAULT_REGIONS} and " \
+                    "#{DEFAULT_CLOCK_REGIONS})",
+    opt_pattern:    'Pattern name (e.g. P1-1-1). Repeatable. Ignores --stage.',
+    opt_ratio:      'Mix ratio of the patterns (as many as --pattern). Normalized to sum 1.',
+    opt_scale:      'Text and answer box size: small/medium/large/onesmall (default small). ' \
+                    'onesmall is the one-column layout for mental only; not used for clock. Ignored with --stage.',
+    opt_output:     "Output file name (.pdf). #{BASENAME}.pdf is used for any other extension.",
+    opt_seed:       'Random seed (for reproducible output)',
+    opt_lang:       "Language #{LANGS.join('/')} (default #{DEFAULT_LANG})",
+    opt_help:       'Show this help',
+    # --- 実行時のメッセージ ---
+    seed_info:      'Generating with seed = %{seed}%{auto}. Page tag: %{tag}',
+    seed_auto:      ' (auto-generated)',
+    info_kuku:      'Stage %{key} (%{sub}): fixed times tables, 4 sets of 16 problems ' \
+                    '(scale=%{scale}, CLI options ignored).',
+    info_stage:     'Stage %{key} (%{sub}): %{pages} pages, %{sets} sets, %{num} problems per set (%{desc}).',
+    info_pattern:   'Patterns %{list}: %{sets} sets, %{num} problems per set (%{desc}).',
+    info_typ:       'Typst file written: %{path}',
+    info_pdf:       'PDF written: %{path}%{pages}',
+    pages_suffix:   ' (%{n} pages)',
+    warn_stage_opts:  'Warning: --pattern/--ratio/--num are ignored when --stage is given.',
+    warn_stage_scale: 'Warning: --scale is ignored when --stage is given (the scale of the stage is used).',
+    warn_clock_scale: 'Warning: --scale is not used for clock patterns (P4-x-x); ' \
+                      'the clock face is sized to fit its region.',
+    warn_output_ext:  'Warning: the output extension is not .pdf, so %{name} is used.',
+    err_lang:         'Error: --lang must be one of %{list} (given: %{v}).',
+    err_pages:        'Error: --pages must be 1 or greater (given: %{v}).',
+    err_scale:        'Error: --scale must be one of %{list} (given: %{v}).',
+    err_scale_oneline: 'Error: --scale %{scale} (one-column layout) can be used only for mental patterns ' \
+                       '(P1-x-x/P3-x-x).',
+    err_stage:        "Error: stage '%{v}' does not exist (see --stage-list).",
+    err_pattern_unknown: 'Error: no such pattern: %{list}',
+    err_pattern_forms:   'Error: mental (P1-x-x/P3-x-x), column (P2-x-x) and clock (P4-x-x) patterns ' \
+                         'cannot be given together.',
+    err_num_mental:   'Error: the number of problems must be between %{min} and %{max} (given: %{v}).',
+    err_num_region:   'Error: the number of problems for column and clock must be one of %{shapes} (given: %{v}).',
+    err_ratio_count:  'Error: --ratio must be given as many times as --pattern.',
+    err_ratio_negative: 'Error: --ratio must not be negative.',
+    err_ratio_zero:   'Error: the sum of --ratio is 0.',
+    err_no_mode:      'Error: give --stage or --pattern (see --stage-list).',
+    err_typst:        'typst failed to compile. See the output above.',
+    err_stage_region: 'Internal error: the number of problems of stage %{key} (%{num}) cannot be split ' \
+                      'into regions (%{shapes}).',
+    err_dec_exp:      'Internal error: exponent range %{exps} of the decimal pattern contradicts ' \
+                      '"1 or greater = %{ge1}".',
+    err_dec_empty:    'Internal error: no pair of numbers satisfies pattern %{key}.'
+  }
+}.freeze
 
 # ---- パターン定義 ------------------------------------------------------
 # 各パターンは op(:add/:sub/:mul/:read)と、[a, b] を返す生成 proc を持つ。
@@ -298,7 +536,7 @@ end
 def dec_operands(spec)
   ge1, digits, exps = spec
   unless exps.all? { |e| (e >= 0) == ge1 }
-    raise "内部エラー: 小数パターンの指数範囲 #{exps.inspect} が「1以上=#{ge1}」と矛盾します。"
+    raise t(:err_dec_exp, exps: exps.inspect, ge1: ge1)
   end
 
   exps.flat_map { |e| dec_mantissas(digits).map { |m| [m, e - (digits - 1)] } }
@@ -330,7 +568,7 @@ def def_dec_pattern(id, a:, b:, r:)
   key = id.upcase
   def_pattern(id, :mul) do
     cands = (DEC_CANDS[key] ||= dec_candidates(a, b, r))
-    raise "内部エラー: パターン #{key} を満たす数値の組がありません。" if cands.empty?
+    raise t(:err_dec_empty, key: key) if cands.empty?
 
     cands.sample
   end
@@ -612,10 +850,11 @@ def_clock_pattern('P4-1-2')
 def_clock_pattern('P4-1-3')
 def_clock_pattern('P4-1-4')
 
-# 時計(よみ)の解答文字列。0 じ は 12 じ とも読めるため併記する。
+# 時計(よみ)の解答文字列。「じ」「ふん」の書き方と 0 時の扱いは言語ごとに異なる
+# (日本語は「0 じ(12 じ)」と併記、英語は 12 とのみ書く)ため TEXTS 側で決める。
 def clock_answer(hour, minute, minute_asked)
-  h = hour.zero? ? '0 じ(12 じ)' : "#{hour} じ"
-  minute_asked ? "#{h} #{minute} ふん" : h
+  h = hour.zero? ? t(:clock_h0) : t(:clock_h, h: clock_num(hour))
+  minute_asked ? t(:clock_hm, h: h, m: clock_min_num(minute)) : t(:clock_only, h: h)
 end
 
 # ---- 制約(コスト関数)---------------------------------------------------
@@ -704,70 +943,71 @@ CONSTR_SUB_LOW2 = (CONSTR_SIMILAR + [[COST_B_LOW_ZERO, 1], [COST_ANS_UNITS_ZERO,
 CONSTR_CLOCK = [[dup_cost(->(p) { p[:a] }), 0], [dup_cost(->(p) { p[:b] }), 0]].freeze
 
 # ---- ステージ定義 ------------------------------------------------------
+# サブタイトル(たしざん暗算1 など)は言語依存のため TEXTS 側に置く(stage_subtitle)。
 # entries: [[パターン候補配列, 問題数], ...]。候補が複数なら等確率で 1 つ選ぶ。
 # constraints: [[コスト関数, 上限], ...]。1 回内で総コストを上限以下に調整する。
 # special: :kuku のステージは問題数・並び順・回数が固定(CLI 指定を無視)。
 STAGES = {
-  'S1-1-1' => { subtitle: 'たしざん暗算1', scale: :large, constraints: [[COST_ONES, 2]],
+  'S1-1-1' => { scale: :large, constraints: [[COST_ONES, 2]],
                 entries: [[%w[P1-1-1], 10]] },
-  'S1-1-2' => { subtitle: 'たしざん暗算2', scale: :large, constraints: [[COST_ONES, 1]],
+  'S1-1-2' => { scale: :large, constraints: [[COST_ONES, 1]],
                 entries: [[%w[P1-1-1], 2], [%w[P1-1-2], 2], [%w[P1-1-3], 6]] },
-  'S1-1-3' => { subtitle: 'たしざん暗算3', scale: :large, constraints: [[COST_ONES, 1]],
+  'S1-1-3' => { scale: :large, constraints: [[COST_ONES, 1]],
                 entries: [[%w[P1-1-1 P1-1-2 P1-1-3], 2], [%w[P1-1-4], 8]] },
-  'S1-1-4' => { subtitle: 'たしざん暗算4', scale: :large,
+  'S1-1-4' => { scale: :large,
                 entries: [[%w[P1-1-1 P1-1-2 P1-1-3], 2], [%w[P1-1-4], 3], [%w[P1-1-5], 5]] },
-  'S1-1-5' => { subtitle: 'たしざん暗算5', scale: :large,
+  'S1-1-5' => { scale: :large,
                 entries: [[%w[P1-1-3], 2], [%w[P1-1-6], 8]] },
-  'S1-2-1' => { subtitle: 'ひきざん暗算1', scale: :large,
+  'S1-2-1' => { scale: :large,
                 constraints: [[COST_B_ONES, 1], [COST_A_TEN, 2], [COST_ZERO_ANS, 1]],
                 entries: [[%w[P1-2-1], 10]] },
-  'S1-2-2' => { subtitle: 'ひきざん暗算2', scale: :large,
+  'S1-2-2' => { scale: :large,
                 constraints: [[COST_B_ONES, 1], [COST_ZERO_TEN_ANS, 1]],
                 entries: [[%w[P1-2-1], 2], [%w[P1-2-2], 8]] },
-  'S1-3-1' => { subtitle: 'かけざん暗算1', scale: :medium, special: :kuku },
-  'S1-3-2' => { subtitle: 'かけざん暗算2', scale: :medium, entries: [[%w[P1-3-1], 16]] },
-  'S1-3-3' => { subtitle: 'かけざん暗算3', scale: :small, entries: [[%w[P1-3-2], 20]] },
-  'S1-3-4' => { subtitle: 'かけざん暗算4', scale: :small, entries: [[%w[P1-3-3], 20]] },
-  'S1-3-5' => { subtitle: 'かけざん暗算5', scale: :small, entries: [[%w[P1-3-4], 20]] },
-  'S1-3-6' => { subtitle: 'かけざん暗算6', scale: :small, entries: [[%w[P1-3-5], 10], [%w[P1-3-6], 10]] },
-  'S1-5-1' => { subtitle: 'たしひき暗算1', scale: :large,
+  'S1-3-1' => { scale: :medium, special: :kuku },
+  'S1-3-2' => { scale: :medium, entries: [[%w[P1-3-1], 16]] },
+  'S1-3-3' => { scale: :small, entries: [[%w[P1-3-2], 20]] },
+  'S1-3-4' => { scale: :small, entries: [[%w[P1-3-3], 20]] },
+  'S1-3-5' => { scale: :small, entries: [[%w[P1-3-4], 20]] },
+  'S1-3-6' => { scale: :small, entries: [[%w[P1-3-5], 10], [%w[P1-3-6], 10]] },
+  'S1-5-1' => { scale: :large,
                 constraints: [[COST_MIXED_ONES, 1], [COST_A_TEN, 1], [COST_SUB_ZERO_TEN_ANS, 1]],
                 entries: [[%w[P1-1-3], 2], [%w[P1-1-6], 3],
                           [%w[P1-2-1], 2], [%w[P1-2-2], 3]] },
-  'S1-8-1' => { subtitle: '小数かけざん暗算1', scale: :onesmall,
+  'S1-8-1' => { scale: :onesmall,
                 entries: [[dec_pats(1..5), 1], [dec_pats(6..10), 1], [dec_pats(11..15), 1],
                           [dec_pats(16..19), 1], [dec_pats(20..23), 1], [dec_pats(24..31), 1],
                           [dec_pats(32..39), 1], [dec_pats(40..51), 1], [dec_pats(52..63), 1],
                           [dec_pats(64..75), 1],
                           [dec_pats(17, 19, 22, 23, 26, 27, 30, 31, 34, 35, 38, 39), 5]] },
-  'S2-1-1' => { subtitle: 'たしざん筆算1', scale: :large, constraints: CONSTR_A_TENS_ONE,
+  'S2-1-1' => { scale: :large, constraints: CONSTR_A_TENS_ONE,
                 entries: [[%w[P2-1-1], 12]] },
-  'S2-1-2' => { subtitle: 'たしざん筆算2', scale: :large, constraints: CONSTR_A_TENS_ONE,
+  'S2-1-2' => { scale: :large, constraints: CONSTR_A_TENS_ONE,
                 entries: [[%w[P2-1-1], 4], [%w[P2-1-2], 8]] },
-  'S2-1-3' => { subtitle: 'たしざん筆算3', scale: :large, constraints: CONSTR_A_TENS_ONE,
+  'S2-1-3' => { scale: :large, constraints: CONSTR_A_TENS_ONE,
                 entries: [[%w[P2-1-3], 4], [%w[P2-1-4], 8]] },
-  'S2-1-4' => { subtitle: 'たしざん筆算4', scale: :large, constraints: CONSTR_A_TENS_ZERO_ONE,
+  'S2-1-4' => { scale: :large, constraints: CONSTR_A_TENS_ZERO_ONE,
                 entries: [[%w[P2-1-4], 1], [%w[P2-1-5], 3], [%w[P2-1-6], 8]] },
-  'S2-1-5' => { subtitle: 'たしざん筆算5', scale: :large, constraints: CONSTR_TENS_ZERO_ONE,
+  'S2-1-5' => { scale: :large, constraints: CONSTR_TENS_ZERO_ONE,
                 entries: [[%w[P2-1-7], 1], [%w[P2-1-8], 5], [%w[P2-1-9], 6]] },
-  'S2-2-1' => { subtitle: 'ひきざん筆算1', scale: :large, constraints: CONSTR_SUB_UNITS,
+  'S2-2-1' => { scale: :large, constraints: CONSTR_SUB_UNITS,
                 entries: [[%w[P2-2-1], 12]] },
-  'S2-2-2' => { subtitle: 'ひきざん筆算2', scale: :large, constraints: CONSTR_SUB_UNITS,
+  'S2-2-2' => { scale: :large, constraints: CONSTR_SUB_UNITS,
                 entries: [[%w[P2-2-1], 4], [%w[P2-2-2], 8]] },
-  'S2-2-3' => { subtitle: 'ひきざん筆算3', scale: :large, constraints: CONSTR_SUB_LOW2,
+  'S2-2-3' => { scale: :large, constraints: CONSTR_SUB_LOW2,
                 entries: [[%w[P2-2-2], 1], [%w[P2-2-3], 2], [%w[P2-2-4], 2],
                           [%w[P2-2-7], 3], [%w[P2-2-8], 4]] },
-  'S2-2-4' => { subtitle: 'ひきざん筆算4', scale: :large, constraints: CONSTR_SUB_LOW2,
+  'S2-2-4' => { scale: :large, constraints: CONSTR_SUB_LOW2,
                 entries: [[%w[P2-2-3], 1], [%w[P2-2-4], 1], [%w[P2-2-5], 1], [%w[P2-2-6], 1],
                           [%w[P2-2-7], 1], [%w[P2-2-8], 2], [%w[P2-2-9], 2], [%w[P2-2-10], 2],
                           [%w[P2-2-11], 1]] },
-  'S3-1-1' => { subtitle: 'よみ1', scale: :small,
+  'S3-1-1' => { scale: :small,
                 entries: [[%w[P4-1-1], 4]] },
-  'S3-1-2' => { subtitle: 'よみ2', scale: :small, constraints: CONSTR_CLOCK,
+  'S3-1-2' => { scale: :small, constraints: CONSTR_CLOCK,
                 entries: [[%w[P4-1-1], 1], [%w[P4-1-2], 3]] },
-  'S3-1-3' => { subtitle: 'よみ3', scale: :small, constraints: CONSTR_CLOCK,
+  'S3-1-3' => { scale: :small, constraints: CONSTR_CLOCK,
                 entries: [[%w[P4-1-2], 1], [%w[P4-1-3], 3]] },
-  'S3-1-4' => { subtitle: 'よみ4', scale: :small, constraints: CONSTR_CLOCK,
+  'S3-1-4' => { scale: :small, constraints: CONSTR_CLOCK,
                 entries: [[%w[P4-1-1 P4-1-2 P4-1-3], 1], [%w[P4-1-4], 3]] }
 }.freeze
 
@@ -1107,7 +1347,10 @@ end
 def typ_preamble(title_text, stage_name, form, tag)
   <<~TYP
     // 自動生成ファイル (arithprac.rb) — 直接編集しないでください。
-    #set text(font: "#{JP_FONT}", size: 12pt, lang: "ja")
+    #set text(font: "#{body_font}", size: 12pt, lang: "#{lang}")
+    // アポストロフィ(英語の o'clock)を約物に置き換えない。日本語フォントの
+    // 曲がりアポストロフィは全角幅で、前後に不自然な空きができるため。
+    #set smartquote(enabled: false)
 
     // ステージ名(ステージ指定時のみ。空文字なら非表示)。「第N回」の左に置く。
     #let stagename = "#{stage_name}"
@@ -1129,7 +1372,7 @@ def typ_preamble(title_text, stage_name, form, tag)
       #align(center)[#text(size: 18pt, weight: "bold")[#{title_text}]]
       #v(3pt)
       #align(center)[#text(size: 10pt)[
-        #if stagename != "" [#stagename #h(6mm)]#title #h(8mm) 名前 #box(width: 28mm, stroke: (bottom: 0.5pt))[] #h(4mm) 得点 #box(width: 14mm, stroke: (bottom: 0.5pt))[]
+        #if stagename != "" [#stagename #h(6mm)]#title #h(8mm) #{t(:name)} #box(width: 28mm, stroke: (bottom: 0.5pt))[] #h(4mm) #{t(:score)} #box(width: 14mm, stroke: (bottom: 0.5pt))[]
       ]]
       #v(#{HEAD_GAP[form]}pt)
     ]
@@ -1334,7 +1577,7 @@ def typ_clock_face_defs
           place(dx: p.at(0) - cell / 2, dy: p.at(1) - cell / 2,
             box(width: cell, height: cell,
               align(center + horizon,
-                text(font: "#{JP_FONT}", size: 0.20 * r, fill: ink)[#n])))
+                text(font: "#{body_font}", size: 0.20 * r, fill: ink)[#n])))
         }
 
         // 針(学習用に、中心から先端までで尾は出さない)
@@ -1347,6 +1590,77 @@ def typ_clock_face_defs
         // 中心の軸
         let dot = 0.05 * r
         place(dx: cx - dot, dy: cy - dot, circle(radius: dot, fill: ink))
+      })
+    }
+  TYP
+end
+
+# 解答欄(角丸四角)の中の字。置き方が言語で異なるため定義を分ける。
+# 幅は時計盤(直径 d)より左右 ansboxover ずつ広く、高さは h。
+def typ_clockans_def
+  lang == :en ? typ_clockans_en : typ_clockans_ja
+end
+
+# 日本語: 単位「じ」「ふん」を置く。
+# 「ふん」は右端が角丸の始まり(右端 - 半径)より fundx 右、「じ」は右端が
+# 解答欄の中央より jidx 左に来るように置く。どちらも下端は解答欄の下端から unitgap 上。
+# showmin が偽のパターン(「ふん」を問わない)は「ふん」を出さず、
+# 「じ」を「ふん」の位置(角丸の始まり。fundx のずらしはしない)に置く。
+def typ_clockans_ja
+  c = CLOCK_LAYOUT
+  <<~TYP.chomp
+    #let fundx = #{c[:fun_dx]}mm  // 「ふん」の右端を角丸の始まりから右へずらす量
+    #let jidx  = #{c[:ji_dx]}mm  // 「じ」の右端を解答欄の中央から左へずらす量
+
+    #let clockans(d, h, showmin) = {
+      let w = d + 2 * ansboxover
+      // 文字の右端の位置。右揃えの箱の幅で表す。
+      let jiw = if showmin { w / 2 - jidx } else { w - ansboxr }
+      box(width: w, height: h, stroke: ansboxthk, radius: ansboxr, {
+        place(bottom + left, dy: -unitgap,
+          box(width: jiw, align(right)[#text(size: unitfs)[#{t(:clock_hour_unit)}]]))
+        if showmin {
+          place(bottom + left, dy: -unitgap,
+            box(width: w - ansboxr + fundx, align(right)[#text(size: unitfs)[#{t(:clock_min_unit)}]]))
+        }
+      })
+    }
+  TYP
+end
+
+# 英語: 単位は書かず、「It is」(左)と「．」(右)のあいだに下線を 1 本引く。
+# 解答は「three fifteen」のように英単語で書くため、「ふん」の有無で置き方を変えない。
+# 枠(角丸四角)は描かないが、占める幅と高さは日本語と同じにする。文字の左右の位置も
+# 日本語と同じ基準(角丸の終わり / 始まり)から測るため、ansboxr は位置の基準として残す。
+# 「It is」は左端が角丸の終わり(直線の始まり)より itisdx 左、「．」は右端が
+# 角丸の始まりより perioddx 右。どちらも下端は解答欄の下端から unitgap 上。
+# 下線は文字と同じ下端の高さに、「It is」の右端と「．」の左端から linegap ずつ空けて引く。
+# 全体(「It is」・下線・「．」)は、日本語の「じ」「ふん」の位置より enlift 上に置く。
+def typ_clockans_en
+  c = CLOCK_LAYOUT
+  <<~TYP.chomp
+    #let itisdx   = #{c[:itis_dx]}mm  // 「It is」の左端を角丸の終わりから左へずらす量
+    #let perioddx = #{c[:period_dx]}mm  // 「．」の右端を角丸の始まりから右へずらす量
+    #let periodfs = #{c[:period_fs]}pt  // 「．」の文字サイズ(全角。見やすさのため大きめ)
+    #let linegap  = #{c[:line_gap]}mm  // 下線の両端と「It is」「．」のあいだの空き
+    #let enlift   = #{c[:en_lift]}mm  // 「It is」・下線・「．」の全体を上へずらす量
+    #let enbase   = unitgap + enlift  // 解答欄の下端から、字と下線の下端までの距離
+
+    #let clockans(d, h, showmin) = {
+      let w = d + 2 * ansboxover
+      let itis = text(size: unitfs)[#{t(:clock_itis)}]
+      let period = text(size: periodfs)[#{t(:clock_period)}]
+      box(width: w, height: h, {
+        place(bottom + left, dx: ansboxr - itisdx, dy: -enbase, itis)
+        // 「．」の右端の位置は、右揃えの箱の幅で表す。
+        place(bottom + left, dy: -enbase,
+          box(width: w - ansboxr + perioddx, align(right)[#period]))
+        // 記入欄の下線。両端は文字の幅を測って決める。
+        context {
+          let x1 = ansboxr - itisdx + measure(itis).width + linegap
+          let x2 = w - ansboxr + perioddx - measure(period).width - linegap
+          place(bottom + left, dx: x1, dy: -enbase, line(length: x2 - x1, stroke: ansboxthk))
+        }
       })
     }
   TYP
@@ -1366,33 +1680,13 @@ def typ_clock_defs
     #let ansboxr   = #{c[:boxr]}mm     // 解答欄の角丸の半径
     #let ansboxthk = #{c[:boxthk]}pt   // 解答欄の線の太さ
     #let clockgap  = #{c[:gap]}mm     // 時計盤と解答欄のあいだの空き
-    #let unitfs    = #{c[:unitfs]}pt   // 「じ」「ふん」の文字サイズ
-    #let unitgap   = #{c[:unitgap]}mm     // 解答欄の下端から「じ」「ふん」の下端までの距離
-    #let fundx     = #{c[:fun_dx]}mm      // 「ふん」の右端を角丸の始まりから右へずらす量
-    #let jidx      = #{c[:ji_dx]}mm      // 「じ」の右端を解答欄の中央から左へずらす量
+    #let unitfs    = #{c[:unitfs]}pt   // 解答欄の中の字(「じ」「ふん」/「It is」)の文字サイズ
+    #let unitgap   = #{c[:unitgap]}mm     // 解答欄の下端から中の字の下端までの距離
     #let rpadx     = #{c[:rpad_x]}mm     // リージョン内の左右の余白
     #let rpady     = #{c[:rpad_y]}mm     // 同・上下の余白
     #let numfs     = 12pt   // 問題番号(丸数字)のフォントサイズ
 
-    // 解答欄(角丸四角)。幅は時計盤(直径 d)より左右 ansboxover ずつ広く、高さは h。
-    // 「ふん」は右端が角丸の始まり(右端 - 半径)より fundx 右、「じ」は右端が
-    // 解答欄の中央より jidx 左に来るように置く。
-    // どちらも下端は解答欄の下端から unitgap 上。
-    // showmin が偽のパターン(「ふん」を問わない)は「ふん」を出さず、
-    // 「じ」を「ふん」の位置(角丸の始まり。fundx のずらしはしない)に置く。
-    #let clockans(d, h, showmin) = {
-      let w = d + 2 * ansboxover
-      // 文字の右端の位置。右揃えの箱の幅で表す。
-      let jiw = if showmin { w / 2 - jidx } else { w - ansboxr }
-      box(width: w, height: h, stroke: ansboxthk, radius: ansboxr, {
-        place(bottom + left, dy: -unitgap,
-          box(width: jiw, align(right)[#text(size: unitfs)[じ]]))
-        if showmin {
-          place(bottom + left, dy: -unitgap,
-            box(width: w - ansboxr + fundx, align(right)[#text(size: unitfs)[ふん]]))
-        }
-      })
-    }
+    #{typ_clockans_def}
 
     // 1 リージョン(1 問分)。時計盤は上、解答欄は下、どちらも左右中央に置く。
     // 番号は左上(place なので配置に影響しない。時計盤は丸いので重ならない)。
@@ -1492,9 +1786,9 @@ def typ_problem_pages(sets, num, kind, scale)
   ln = left_count(num, scale)
   probset_args = lambda do |set, n|
     if kind == :mental
-      "\"第#{n}回\", #{typ_problems(set[0...ln])}, #{typ_problems(set[ln...num])}"
+      "\"#{t(:set_no, n: n)}\", #{typ_problems(set[0...ln])}, #{typ_problems(set[ln...num])}"
     else
-      "\"第#{n}回\", #{typ_problems(set, kind)}"
+      "\"#{t(:set_no, n: n)}\", #{typ_problems(set, kind)}"
     end
   end
   out = +''
@@ -1525,10 +1819,14 @@ def build_typst(sets, num, title_text, stage_name, scale, form, tag)
   out << typ_problem_pages(sets, num, kind, scale)
 
   # ================= 解答(A4 縦) =================
+  # 見出しは「大見出し・ステージ名・解答」を言語ごとの区切り字でつないだもの。
+  # Typst 側で組み立てると、区切り字の "- " が行頭に来たときにリストとして
+  # 解釈されてしまうため、Ruby 側で 1 つの文字列にしてから渡す。
+  ans_head = [title_text, stage_name, t(:answers)].compact.join(t(:ans_head_sep))
   out << <<~TYP
 
     #set page(flipped: false, margin: (x: 10mm, y: 10mm), background: tagans)
-    #align(center)[#text(size: 16pt, weight: "bold")[#{title_text}#if stagename != "" [ #stagename] 解答]]
+    #align(center)[#text(size: 16pt, weight: "bold")[#{ans_head}]]
     #v(6pt)
     #grid(columns: (#{(['1fr'] * ans_cols(scale, form)).join(', ')}), column-gutter: 3mm,
           row-gutter: #{ans_row_gap(scale)}pt,
@@ -1536,7 +1834,7 @@ def build_typst(sets, num, title_text, stage_name, scale, form, tag)
 
   ln = ans_left_count(num, scale, form)
   sets.each_with_index do |s, i|
-    out << %{  ansblock("第#{i + 1}回", #{typ_answers(s)}, #{ln}),\n}
+    out << %{  ansblock("#{t(:set_no, n: i + 1)}", #{typ_answers(s)}, #{ln}),\n}
   end
   out << ")\n"
 
@@ -1545,10 +1843,31 @@ end
 
 # ---- メイン ------------------------------------------------------------
 
+# ARGV から --lang の指定だけを先に読む。使い方(--help)やエラーの文言も
+# --lang に従うため、OptionParser を組み立てる前に言語を確定させる必要がある。
+# ここで拾えるのは完全な形の指定(--lang ja / --lang=ja)のみ。省略形は
+# OptionParser が解釈するので、parse! の後にもう一度反映する。
+def preparse_lang(argv)
+  i = argv.index { |a| a == '--lang' || a.start_with?('--lang=') }
+  return DEFAULT_LANG unless i
+
+  to_lang(argv[i].start_with?('--lang=') ? argv[i].split('=', 2)[1] : argv[i + 1])
+end
+
+# 言語名(文字列)をシンボルにする。不正な値はエラーで終了する。
+def to_lang(str)
+  sym = str.to_s.downcase.to_sym
+  abort t(:err_lang, list: LANGS.join('/'), v: str) unless LANGS.include?(sym)
+
+  sym
+end
+
 main = lambda do
 options = { pages: nil, num: nil, seed: nil,
             stage: nil, patterns: [], ratios: [], output: nil, stage_list: false,
-            scale: nil }
+            scale: nil, lang: nil }
+
+lang!(preparse_lang(ARGV))
 
 OptionParser.accept(Rational) do |s,|
   Rational(s)
@@ -1557,28 +1876,27 @@ rescue ArgumentError, ZeroDivisionError, TypeError
 end
 
 parser = OptionParser.new do |o|
-  o.banner = '使い方: ruby arithprac.rb [options]'
-  o.on('-s S', '--stage S', String, 'ステージ名(例: S1-1-1)。--num/--pattern/--ratio を無視。') { |v| options[:stage] = v }
-  o.on('-p P', '--pages P', Integer, "問題のページ数(1 ページ = 2 回分, 既定 #{DEFAULT_PAGES})") { |v| options[:pages] = v }
-  o.on('--stage-list', 'ステージ名とサブタイトルの一覧を表示して終了') { options[:stage_list] = true }
-  o.on('-n N', '--num N', Integer,
-       "1 回あたりの問題数(暗算: #{MIN_PROBLEMS}〜#{MAX_PROBLEMS}, 既定 #{DEFAULT_PROBLEMS} / " \
-       "筆算・時計: #{REGION_SHAPES.keys.join('・')} のいずれか, 既定 #{DEFAULT_REGIONS}・" \
-       "#{DEFAULT_CLOCK_REGIONS})") { |v| options[:num] = v }
-  o.on('--pattern P', String, 'パターン名(例: P1-1-1)。複数指定可。--stage を無視。') { |v| options[:patterns] << v }
-  o.on('--ratio R', Rational, 'パターンの混合比率(--pattern と同数)。合計 1 に正規化。') { |v| options[:ratios] << v }
-  o.on('--scale S', String,
-       '文字・解答欄サイズ small/medium/large/onesmall(既定 small)。' \
-       'onesmall は暗算のみの 1 列レイアウト。時計では使わない。--stage 指定時は無視。') { |v| options[:scale] = v }
-  o.on('-o O', '--output O', String, "出力ファイル名(.pdf)。不正な拡張子なら #{BASENAME}.pdf を使用。") { |v| options[:output] = v }
-  o.on('--seed S', Integer, '乱数シード(再現用)') { |v| options[:seed] = v }
-  o.on('-h', '--help', 'この使い方を表示') { puts o; exit }
+  o.banner = t(:usage)
+  o.on('-s S', '--stage S', String, t(:opt_stage)) { |v| options[:stage] = v }
+  o.on('-p P', '--pages P', Integer, t(:opt_pages)) { |v| options[:pages] = v }
+  o.on('--stage-list', t(:opt_stage_list)) { options[:stage_list] = true }
+  o.on('-n N', '--num N', Integer, t(:opt_num)) { |v| options[:num] = v }
+  o.on('--pattern P', String, t(:opt_pattern)) { |v| options[:patterns] << v }
+  o.on('--ratio R', Rational, t(:opt_ratio)) { |v| options[:ratios] << v }
+  o.on('--scale S', String, t(:opt_scale)) { |v| options[:scale] = v }
+  o.on('-o O', '--output O', String, t(:opt_output)) { |v| options[:output] = v }
+  o.on('--lang L', String, t(:opt_lang)) { |v| options[:lang] = v }
+  o.on('--seed S', Integer, t(:opt_seed)) { |v| options[:seed] = v }
+  o.on('-h', '--help', t(:opt_help)) { puts o; exit }
 end
 parser.parse!(ARGV)
 
+# 省略形(--lan など)で指定された場合はここで反映する(preparse_lang は完全形のみ)。
+lang!(to_lang(options[:lang])) if options[:lang]
+
 # --stage-list: 一覧表示して終了
 if options[:stage_list]
-  STAGES.each { |id, s| puts "#{id}\t#{s[:subtitle]}" }
+  STAGES.each_key { |id| puts "#{id}\t#{stage_subtitle(id)}" }
   exit
 end
 
@@ -1587,19 +1905,17 @@ end
 seed = options[:seed] || Random.new_seed
 srand(seed)
 tag = format('%04X', seed & 0xFFFF)
-puts "seed = #{seed}#{options[:seed] ? '' : '(自動生成)'} で生成します。ページタグ: #{tag}"
+puts t(:seed_info, seed: seed, auto: options[:seed] ? '' : t(:seed_auto), tag: tag)
 
 pages = options[:pages] || DEFAULT_PAGES
-abort "エラー: --pages は 1 以上を指定してください(指定: #{pages})。" if pages < 1
+abort t(:err_pages, v: pages) if pages < 1
 sets_count = 2 * pages
 
 # --scale の検証(指定された場合のみ)。実際に採用するスケールはモード決定時に確定。
 scale_opt = nil
 if options[:scale]
   scale_opt = options[:scale].downcase.to_sym
-  unless SCALES.key?(scale_opt)
-    abort "エラー: --scale は #{SCALES.keys.join('/')} のいずれかを指定してください(指定: #{options[:scale]})。"
-  end
+  abort t(:err_scale, list: SCALES.keys.join('/'), v: options[:scale]) unless SCALES.key?(scale_opt)
 end
 
 # 出題モードの決定: --stage 優先、無ければ --pattern、いずれも無ければエラー。
@@ -1610,10 +1926,10 @@ form = :mental    # 出題形式(:mental=暗算 / :column=筆算)
 if options[:stage]
   key = options[:stage].upcase
   stage = STAGES[key]
-  abort "エラー: ステージ '#{options[:stage]}' は存在しません(一覧は --stage-list)。" unless stage
-  warn '警告: --stage 指定時は --pattern/--ratio/--num は無視されます。' if !options[:patterns].empty? || !options[:ratios].empty? || options[:num]
-  warn '警告: --stage 指定時は --scale は無視されます(ステージ固有のスケールを使用)。' if scale_opt
-  stage_name = stage[:subtitle]
+  abort t(:err_stage, v: options[:stage]) unless stage
+  warn t(:warn_stage_opts) if !options[:patterns].empty? || !options[:ratios].empty? || options[:num]
+  warn t(:warn_stage_scale) if scale_opt
+  stage_name = stage_subtitle(key)
   scale = stage[:scale] # ステージ指定時は --scale を無視しステージ固有スケールを使う
   form = stage_form(stage)
 
@@ -1621,42 +1937,39 @@ if options[:stage]
     # 九九: 問題数・並び順・回数(4)が固定。--pages も無視。
     sets = make_kuku_sets
     num = 16
-    puts "ステージ #{key}(#{stage[:subtitle]}): 九九固定 4 回・1 回 16 問(scale=#{scale}, CLI 指定は無視)。"
+    puts t(:info_kuku, key: key, sub: stage_name, scale: scale)
   else
     num = stage_num(stage)
     # 筆算・時計は問題数 = リージョン数。分割できない問題数のステージは定義ミス。
     if form != :mental && !REGION_SHAPES.key?(num)
-      abort "内部エラー: ステージ #{key} の問題数(#{num})はリージョンに分割できません" \
-            "(#{REGION_SHAPES.keys.join(' / ')})。"
+      abort t(:err_stage_region, key: key, num: num, shapes: REGION_SHAPES.keys.join(' / '))
     end
     # 履歴は全回で共有する(回をまたいだ重複回避のため)。
-hist = new_history(variety: form == :column)
-sets = Array.new(sets_count) { make_stage_set(stage, hist) }
-    puts "ステージ #{key}(#{stage[:subtitle]}): #{pages} ページ・#{sets_count} 回・1 回 #{num} 問" \
-         "(#{form_desc(form, scale)})。"
+    hist = new_history(variety: form == :column)
+    sets = Array.new(sets_count) { make_stage_set(stage, hist) }
+    puts t(:info_stage, key: key, sub: stage_name, pages: pages, sets: sets_count,
+                        num: num, desc: form_desc(form, scale))
   end
 
 elsif !options[:patterns].empty?
   patterns = options[:patterns]
   unknown = patterns.reject { |p| PATTERNS.key?(p.upcase) }
-  abort "エラー: パターンが存在しません: #{unknown.join(', ')}" unless unknown.empty?
+  abort t(:err_pattern_unknown, list: unknown.join(', ')) unless unknown.empty?
 
   forms = patterns.map { |p| pattern_form(p) }.uniq
-  if forms.size > 1
-    abort 'エラー: 暗算(P1-x-x/P3-x-x)・筆算(P2-x-x)・時計(P4-x-x)のパターンは同時に指定できません。'
-  end
+  abort t(:err_pattern_forms) if forms.size > 1
   form = forms.first
 
   if form == :mental
     num = options[:num] || DEFAULT_PROBLEMS
     unless (MIN_PROBLEMS..MAX_PROBLEMS).include?(num)
-      abort "エラー: 問題数は #{MIN_PROBLEMS}〜#{MAX_PROBLEMS} の範囲で指定してください(指定: #{num})。"
+      abort t(:err_num_mental, min: MIN_PROBLEMS, max: MAX_PROBLEMS, v: num)
     end
   else
     # 筆算・時計: 問題数がリージョン分割形を決めるため、分割できる値のみ受け付ける。
     num = options[:num] || (form == :clock ? DEFAULT_CLOCK_REGIONS : DEFAULT_REGIONS)
     unless REGION_SHAPES.key?(num)
-      abort "エラー: 筆算・時計の問題数は #{REGION_SHAPES.keys.join(' / ')} のいずれかを指定してください(指定: #{num})。"
+      abort t(:err_num_region, shapes: REGION_SHAPES.keys.join(' / '), v: num)
     end
   end
 
@@ -1664,27 +1977,24 @@ elsif !options[:patterns].empty?
   if ratios.empty?
     ratios = Array.new(patterns.size, Rational(1, patterns.size))
   else
-    abort 'エラー: --ratio は --pattern と同じ数だけ指定してください。' unless ratios.size == patterns.size
-    abort 'エラー: --ratio に負の値は指定できません。' if ratios.any?(&:negative?)
+    abort t(:err_ratio_count) unless ratios.size == patterns.size
+    abort t(:err_ratio_negative) if ratios.any?(&:negative?)
     total = ratios.sum(0r)
-    abort 'エラー: --ratio の合計が 0 です。' if total.zero?
+    abort t(:err_ratio_zero) if total.zero?
     ratios = ratios.map { |r| r / total }
   end
 
   scale = scale_opt || DEFAULT_SCALE
-  if form != :mental && oneline?(scale)
-    abort "エラー: --scale #{scale}(1 列レイアウト)は暗算(P1-x-x/P3-x-x)のみで使用できます。"
-  end
-  if form == :clock && scale_opt
-    warn '警告: 時計(P4-x-x)では --scale は使いません(時計盤はリージョンに合わせた大きさになります)。'
-  end
+  abort t(:err_scale_oneline, scale: scale) if form != :mental && oneline?(scale)
+  warn t(:warn_clock_scale) if form == :clock && scale_opt
 
   hist = new_history(variety: form == :column)
-sets = Array.new(sets_count) { make_pattern_set(patterns, ratios, num, hist) }
-  puts "パターン #{patterns.join(', ')}: #{sets_count} 回・1 回 #{num} 問(#{form_desc(form, scale)})。"
+  sets = Array.new(sets_count) { make_pattern_set(patterns, ratios, num, hist) }
+  puts t(:info_pattern, list: patterns.join(', '), sets: sets_count, num: num,
+                        desc: form_desc(form, scale))
 
 else
-  warn 'エラー: --stage または --pattern を指定してください(一覧は --stage-list)。'
+  warn t(:err_no_mode)
   warn parser.help
   exit 1
 end
@@ -1693,16 +2003,16 @@ end
 pdf_path = if options[:output]&.downcase&.end_with?('.pdf')
              options[:output]
            else
-             warn "警告: 出力拡張子が .pdf ではないため #{BASENAME}.pdf を使用します。" if options[:output]
+             warn t(:warn_output_ext, name: "#{BASENAME}.pdf") if options[:output]
              "#{BASENAME}.pdf"
            end
 typ_path = pdf_path.sub(/\.pdf\z/i, '.typ')
 
 # 大見出しは出題形式で決まる。
-title_text = { column: '筆算マスター', clock: '時計マスター' }.fetch(form, '暗算マスター')
+title_text = { column: t(:title_column), clock: t(:title_clock) }.fetch(form, t(:title_mental))
 
 File.write(typ_path, build_typst(sets, num, title_text, stage_name, scale, form, tag))
-puts "Typst ファイルを生成: #{typ_path}"
+puts t(:info_typ, path: typ_path)
 
 if system('typst', 'compile', typ_path, pdf_path)
   pages_out = begin
@@ -1710,9 +2020,9 @@ if system('typst', 'compile', typ_path, pdf_path)
   rescue StandardError
     nil
   end
-  puts "PDF を生成: #{pdf_path}#{pages_out ? " (全#{pages_out}ページ)" : ''}"
+  puts t(:info_pdf, path: pdf_path, pages: pages_out ? t(:pages_suffix, n: pages_out) : '')
 else
-  warn 'typst のコンパイルに失敗しました。上の出力を確認してください。'
+  warn t(:err_typst)
   exit 1
 end
 end
