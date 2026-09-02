@@ -46,7 +46,7 @@ The MIT License applies to this program and to the arithmetic worksheets (PDF fi
 
 ### Multiplication (mental)
 
-- Times tables (2×2 .. 9×9), in order
+- Times tables (2×2 .. 9×9), in order; called "Kuku" in Japan
     - [Latest](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-1-en.pdf) [Previous](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-1-en-prev.pdf)
 - Within the times tables (2×2 .. 9×9), in random order
     - [Latest](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-2-en.pdf) [Previous](https://github.com/mochi2diary/arithprac/releases/download/latest/s1-3-2-en-prev.pdf)
