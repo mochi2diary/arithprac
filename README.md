@@ -79,6 +79,16 @@
 - 最大3桁 - 最大3桁 （百・十の位の繰り下がりあり）
     - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-4.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s2-2-4-prev.pdf)
 
+### 時計（読み）
+
+- ○時ちょうど
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-1.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-1-prev.pdf)
+- ○時(0|15|30|45)分
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-2.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-2-prev.pdf)
+- ○時(5の倍数)分
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-3.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-3-prev.pdf)
+- ○時○○分
+    - [最新ファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-4.pdf) [1つ前のファイル](https://github.com/mochi2diary/arithprac/releases/download/latest/s3-1-4-prev.pdf)
 
 ## おわりに
 

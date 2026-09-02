@@ -8,13 +8,14 @@
 # 出題形式:
 #   - 暗算(P1-x-x): 式を 1 行に並べ、右端の□に答えを書かせる。
 #   - 筆算(P2-x-x): 1 回分の領域をリージョンに等分割し、1 問ずつ筆算の形で置く。
+#   - 時計(P4-x-x): 同じくリージョンに等分割し、1 問ずつ時計盤と解答欄を置く。
 #
 # 生成物:
 #   - 問題 : A4 横(landscape)を中央で 2 分割して A5×2。1 枚(A5)に 1 回分。
 #            1 ページ = 2 回分。--pages で回数を制御(回数 = 2 * pages)。
 #            中央に切り取り線を入れる。
 #            暗算は左に前半・右に後半を並べる(奇数個なら左が 1 つ多い)。
-#            筆算は 1 回分を --num 個のリージョンに分けて行優先に並べる。
+#            筆算・時計は 1 回分を --num 個のリージョンに分けて行優先に並べる。
 #   - 解答 : A4 縦。全回分をまとめて印刷(切らない)。「第N回」で対応付ける。
 #
 # 出題の指定:
@@ -31,12 +32,13 @@ DEFAULT_PROBLEMS = 20  # 1 回あたりの問題数の既定値(--pattern 使用
 MIN_PROBLEMS     = 2   # 1 回あたりの問題数の下限
 MAX_PROBLEMS     = 26  # 1 回あたりの問題数の上限
 DEFAULT_REGIONS  = 6   # 筆算の 1 回あたりの問題数(= リージョン数)の既定値
+DEFAULT_CLOCK_REGIONS = 4 # 時計(よみ)の 1 回あたりの問題数(= リージョン数)の既定値
 JP_FONT          = 'BIZ UDGothic'
 # 筆算の数字・演算子だけに使うフォント(本文の JP_FONT とは独立に選ぶ)。
 COLUMN_DIGIT_FONT = 'BIZ UDGothic'
 BASENAME         = 'arithprac'
 
-# 筆算のリージョン分割形 { 問題数(= リージョン数) => [縦の個数(行), 横の個数(列)] }
+# 筆算・時計のリージョン分割形 { 問題数(= リージョン数) => [縦の個数(行), 横の個数(列)] }
 REGION_SHAPES = { 12 => [4, 3], 8 => [4, 2], 6 => [3, 2], 4 => [2, 2], 1 => [1, 1] }.freeze
 
 # ページ下端のタグ(シード下位 16bit の 16 進 4 文字)。印刷後に問題と解答を対応づける。
@@ -48,7 +50,7 @@ TAG_LUMA   = 80     # タグの文字色(luma。小さいほど濃い)
 A5_WIDTH   = 148.5  # A4 横を 2 分割した A5 1 枚の幅(mm)
 
 # 見出し(回・名前・得点)と問題本体の間の空き(pt)。出題形式ごとに異なる。
-HEAD_GAP = { mental: 8, column: 12 }.freeze
+HEAD_GAP = { mental: 8, column: 12, clock: 12 }.freeze
 
 # 演算子記号(表示用)。筆算は全角を使う(半角より字形が広く、字間が行間と釣り合う)。
 OP_SYM     = { add: '+', sub: '−', mul: '×' }.freeze
@@ -76,6 +78,7 @@ SCALES = {
 }.freeze
 DEFAULT_SCALE = :small
 ANSW_DEFAULT      = 12  # 解答の欄幅(mm)。整数の答えは最大 4 桁(9801)で収まる。
+ANSNUMW_DEFAULT   = 6   # 解答の番号(丸数字)の欄幅(mm)
 ANSCOLS_DEFAULT   = 4   # 解答ページに横に並べる回数
 ANSROWGAP_DEFAULT = 6   # 解答ブロックの行間(pt)
 
@@ -85,8 +88,28 @@ def oneline?(scale)
 end
 
 # 解答ページに横に並べる回数。1 列レイアウトは解答ブロックが細いため多く並べられる。
-def ans_cols(scale)
+# 時計は答えが長く(例: 0 じ(12 じ) 55 ふん)ブロックが広いため少なくする。
+def ans_cols(scale, form = :mental)
+  return CLOCK_ANSCOLS if form == :clock
+
   SCALES[scale][:anscols] || ANSCOLS_DEFAULT
+end
+
+# 解答ページの答えの欄幅(mm)。
+def ans_width(scale, form = :mental)
+  return CLOCK_ANSW if form == :clock
+
+  SCALES[scale][:answ] || ANSW_DEFAULT
+end
+
+# 解答ページの番号(丸数字)の欄幅(mm)。時計は答えが長いぶんここを詰める。
+def ans_num_width(form)
+  form == :clock ? CLOCK_ANSNUMW : ANSNUMW_DEFAULT
+end
+
+# 解答ブロックの前半(左列)に置く問題数。時計は答えが長いため 1 列に並べる。
+def ans_left_count(num, scale, form)
+  form == :clock ? num : left_count(num, scale)
 end
 
 # 解答ブロックの行間(pt)。1 列レイアウトはブロックが縦に長いため詰める。
@@ -109,15 +132,46 @@ COLUMN_SCALES = {
             rpad_x: 4.8, rpad_top: 8 }
 }.freeze
 
+# 時計(よみ)のレイアウト。文字・盤面の大きさはリージョンに合わせて決まるため
+# --scale の影響を受けない(時計盤はリージョンに収まる範囲で diam まで大きくする)。
+# 値は mm / pt。
+CLOCK_LAYOUT = {
+  diam: 60,      # 時計盤の直径(リージョンに入らなければ縮める)
+  boxh: 18,      # 解答欄の高さ
+  boxover: 5,    # 解答欄が時計盤からはみ出す幅(左右それぞれ)
+  boxr: 5,       # 解答欄の角丸の半径
+  boxthk: 0.7,   # 解答欄の線の太さ(pt)
+  gap: 3,        # 時計盤と解答欄のあいだの空き
+  unitfs: 10,    # 「じ」「ふん」の文字サイズ(pt)
+  unitgap: 3,    # 解答欄の下端から「じ」「ふん」の下端までの距離
+  fun_dx: 3,     # 「ふん」の右端を角丸の始まりから右へずらす量
+  ji_dx: 2,      # 「ふん」があるとき「じ」の右端を解答欄の中央から左へずらす量
+  rpad_x: 3,     # リージョン内の左右の余白
+  rpad_y: 3      # 同・上下の余白
+}.freeze
+# 解答ページの寸法。答えが「0 じ(12 じ) 55 ふん」のように長い(10pt で 33.6mm)ため
+# 欄幅を広くとり、そのぶん番号欄を詰めて他の形式と同じ横 4 回分に収める。
+# ブロック幅 = anspad 2mm × 2 + 番号欄 + 答えの欄幅 = 45mm。
+# 45mm × 4 + 隙間 3mm × 3 = 189mm で、A4 縦の使える幅(190mm)に収まる。
+CLOCK_ANSW    = 36  # 答えの欄幅(mm)
+CLOCK_ANSNUMW = 5   # 番号(丸数字)の欄幅(mm)。丸数字 3.5mm + セル内側 2pt × 2。
+CLOCK_ANSCOLS = 4   # 解答ページに横に並べる回数
+
 # ---- パターン定義 ------------------------------------------------------
-# 各パターンは op(:add/:sub/:mul)と、[a, b] を返す生成 proc を持つ。
+# 各パターンは op(:add/:sub/:mul/:read)と、[a, b] を返す生成 proc を持つ。
 # 制約(桁範囲・繰り上がり・0/1 の出現など)は棄却サンプリングで満たす。
-# form は出題形式。P1-x-x は暗算(:mental)、P2-x-x は筆算(:column)。
+# form は出題形式。P1-x-x/P3-x-x は暗算(:mental)、P2-x-x は筆算(:column)、
+# P4-x-x は時計(:clock)。
 PATTERNS = {}
 
-def def_pattern(id, op, &gen)
-  form = id.upcase.start_with?('P2') ? :column : :mental
-  PATTERNS[id.upcase] = { id: id, op: op, form: form, gen: gen }
+# attrs はパターン固有の属性(時計の minute など)。問題の生成時に参照する。
+def def_pattern(id, op, **attrs, &gen)
+  form = case id.upcase
+         when /\AP2/ then :column  # 筆算
+         when /\AP4/ then :clock   # 時計
+         else :mental              # 暗算
+         end
+  PATTERNS[id.upcase] = { id: id, op: op, form: form, gen: gen }.merge(attrs)
 end
 
 # パターン ID の出題形式(:mental / :column)。
@@ -535,6 +589,35 @@ def_pattern('P2-2-15', :sub) do  # 4桁(下 3 桁 = 000) - 2〜4桁 = 2〜4桁(�
   end
 end
 
+# --- 時計-よみ(P4-1-x)---
+# 時計(よみ)は a を「じ」(0..11)、b を「ふん」(0..59)として扱う。
+# minute が偽のパターン(P4-1-1)は「ふん」を問わない(解答欄にも「ふん」を出さない)。
+
+# パターンごとの「ふん」の候補。
+CLOCK_MINUTES = {
+  'P4-1-1' => [0],
+  'P4-1-2' => [15, 30, 45],
+  'P4-1-3' => [5, 10, 20, 25, 35, 40, 50, 55],
+  'P4-1-4' => (1..59).reject { |m| (m % 5).zero? }.freeze
+}.freeze
+
+# 時計(よみ)のパターンを定義する。minute: 偽なら「ふん」を問わない。
+def def_clock_pattern(id, minute: true)
+  mins = CLOCK_MINUTES[id.upcase]
+  def_pattern(id, :read, minute: minute) { [rand(12), mins.sample] }
+end
+
+def_clock_pattern('P4-1-1', minute: false)
+def_clock_pattern('P4-1-2')
+def_clock_pattern('P4-1-3')
+def_clock_pattern('P4-1-4')
+
+# 時計(よみ)の解答文字列。0 じ は 12 じ とも読めるため併記する。
+def clock_answer(hour, minute, minute_asked)
+  h = hour.zero? ? '0 じ(12 じ)' : "#{hour} じ"
+  minute_asked ? "#{h} #{minute} ふん" : h
+end
+
 # ---- 制約(コスト関数)---------------------------------------------------
 # 1 回内で「総コストを上限以下に保つ」ための各問コスト関数。
 # adjust! がコストの正の問題を差し替えて総コストを調整する(下記参照)。
@@ -616,6 +699,10 @@ CONSTR_SUB_UNITS = (CONSTR_SIMILAR + [[COST_B_UNITS_ONE, 1], [COST_A_TENS_ONE, 1
 CONSTR_SUB_LOW2 = (CONSTR_SIMILAR + [[COST_B_LOW_ZERO, 1], [COST_ANS_UNITS_ZERO, 1],
                                      [COST_DUP_LOW2_PAIR, 0]]).freeze
 
+# 時計ステージの制約セット。1 回内で「じ」「ふん」がそれぞれ重複しないようにする
+# (「ふん」が違っても同じ「じ」は出さない、およびその逆)。
+CONSTR_CLOCK = [[dup_cost(->(p) { p[:a] }), 0], [dup_cost(->(p) { p[:b] }), 0]].freeze
+
 # ---- ステージ定義 ------------------------------------------------------
 # entries: [[パターン候補配列, 問題数], ...]。候補が複数なら等確率で 1 つ選ぶ。
 # constraints: [[コスト関数, 上限], ...]。1 回内で総コストを上限以下に調整する。
@@ -673,7 +760,15 @@ STAGES = {
   'S2-2-4' => { subtitle: 'ひきざん筆算4', scale: :large, constraints: CONSTR_SUB_LOW2,
                 entries: [[%w[P2-2-3], 1], [%w[P2-2-4], 1], [%w[P2-2-5], 1], [%w[P2-2-6], 1],
                           [%w[P2-2-7], 1], [%w[P2-2-8], 2], [%w[P2-2-9], 2], [%w[P2-2-10], 2],
-                          [%w[P2-2-11], 1]] }
+                          [%w[P2-2-11], 1]] },
+  'S3-1-1' => { subtitle: 'よみ1', scale: :small,
+                entries: [[%w[P4-1-1], 4]] },
+  'S3-1-2' => { subtitle: 'よみ2', scale: :small, constraints: CONSTR_CLOCK,
+                entries: [[%w[P4-1-1], 1], [%w[P4-1-2], 3]] },
+  'S3-1-3' => { subtitle: 'よみ3', scale: :small, constraints: CONSTR_CLOCK,
+                entries: [[%w[P4-1-2], 1], [%w[P4-1-3], 3]] },
+  'S3-1-4' => { subtitle: 'よみ4', scale: :small, constraints: CONSTR_CLOCK,
+                entries: [[%w[P4-1-1 P4-1-2 P4-1-3], 1], [%w[P4-1-4], 3]] }
 }.freeze
 
 def stage_num(stage)
@@ -695,6 +790,8 @@ UNIQUE_ATTEMPTS = 500
 
 # パターン ID から 1 問生成。{a:, b:, op:, ans:, pid:} を返す。
 # pid は差し替え時に同一パターンで再生成するために保持する。
+# 時計(:read)は a =「じ」・b =「ふん」で、解答は文字列(例: 3 じ 30 ふん)になる。
+# minute は「ふん」を問うかどうか(解答欄に「ふん」を出すかの判断に使う)。
 def gen_problem(pid)
   pat = PATTERNS[pid.upcase]
   a, b = pat[:gen].call
@@ -703,8 +800,10 @@ def gen_problem(pid)
         when :add then a + b
         when :sub then a - b
         when :mul then a * b
+        when :read then clock_answer(a, b, pat[:minute])
         end
-  { a: a, b: b, op: op, ans: ans, pid: pat[:id] }
+  prob = { a: a, b: b, op: op, ans: ans, pid: pat[:id] }
+  op == :read ? prob.merge(minute: pat[:minute]) : prob
 end
 
 # 被演算数(a, b)に含まれる数字 '1' の個数。
@@ -948,6 +1047,11 @@ def make_pattern_set(patterns, ratios, num, hist)
   numbered(spread_order(probs))
 end
 
+# 生成時の情報表示用。時計は --scale を使わないためスケールを出さない。
+def form_desc(form, scale)
+  form == :clock ? 'form=clock' : "form=#{form}, scale=#{scale}"
+end
+
 # 丸数字(①..⑳ / ㉑..㉟)を返す。
 def circled(n)
   cp = n <= 20 ? 0x2460 + (n - 1) : 0x3251 + (n - 21)
@@ -956,9 +1060,10 @@ end
 
 # ---- Typst 生成 --------------------------------------------------------
 
-# レイアウトの種別。筆算は :column、暗算は 2 列(:mental)か 1 列(:oneline)。
+# レイアウトの種別。筆算は :column、時計は :clock、
+# 暗算は 2 列(:mental)か 1 列(:oneline)。
 def prob_kind(form, scale)
-  return :column if form == :column
+  return form if %i[column clock].include?(form)
 
   oneline?(scale) ? :oneline : :mental
 end
@@ -979,15 +1084,23 @@ def typ_problems(items, kind = :mental)
       %{(n: "#{circled(p[:n])}", a: "#{zen_digits(p[:a])}", b: "#{zen_digits(p[:b])}", op: "#{OP_SYM_ZEN[p[:op]]}")}
     when :oneline
       %{(n: "#{circled(p[:n])}", expr: "#{prob_expr(p)}")}
+    when :clock
+      # 時計は「じ」(h)・「ふん」(m)と、解答欄に「ふん」を出すか(showmin)を渡す。
+      %{(n: "#{circled(p[:n])}", h: #{p[:a]}, m: #{p[:b]}, showmin: #{p[:minute]})}
     else
       %{(n: "#{circled(p[:n])}", a: "#{dec_str(p[:a])}", b: "#{dec_str(p[:b])}", op: "#{OP_SYM[p[:op]]}")}
     end
   }.join(', ') + ',)'
 end
 
+# 解答の表示文字列。時計の解答は文字列(例: 3 じ 30 ふん)、それ以外は数値。
+def ans_str(prob)
+  prob[:ans].is_a?(String) ? prob[:ans] : dec_str(prob[:ans])
+end
+
 # 解答テーブルのセル配列
 def typ_answers(items)
-  '(' + items.map { |p| %{(n: "#{circled(p[:n])}", p: "#{dec_str(p[:ans])}")} }.join(', ') + ',)'
+  '(' + items.map { |p| %{(n: "#{circled(p[:n])}", p: "#{ans_str(p)}")} }.join(', ') + ',)'
 end
 
 # 暗算・筆算で共通の前文(フォント・見出し・切り取り線・A4 横 1 ページの組み方)。
@@ -1127,11 +1240,10 @@ def typ_twocol_defs(scale)
   TYP
 end
 
-# 問題(筆算)の定義。見出し以降の残り領域を num 個のリージョンに等分し、
-# 1 リージョンに 1 問(右上寄せ)を配置する。番号はリージョンの左上に置く。
-def typ_column_defs(scale, num)
+# 問題(筆算)の定義。1 リージョンに 1 問(右上寄せ)を配置する。
+# 番号はリージョンの左上に置く。リージョン割り自体は typ_region_defs が行う。
+def typ_column_defs(scale)
   s = COLUMN_SCALES[scale]
-  rows, cols = REGION_SHAPES[num]
   <<~TYP
 
     // --- 寸法(スケール: #{scale}) ---
@@ -1145,9 +1257,6 @@ def typ_column_defs(scale, num)
     #let rpadx   = #{s[:rpad_x]}mm    // リージョン内の左右の余白
     #let rpadtop = #{s[:rpad_top]}mm    // 同・上の余白(繰り上がりを書き込む分)
     #let numfs   = 12pt   // 問題番号(丸数字)のフォントサイズ
-
-    // リージョンの区切り点線(外周には引かない)
-    #let regionline = (paint: luma(140), thickness: 0.4pt, dash: "dotted")
 
     // 1 文字 = 1 セル。上下左右中央揃え。
     #let digcell(c) = align(center + horizon)[#text(font: digfont, size: digfs)[#c]]
@@ -1182,6 +1291,138 @@ def typ_column_defs(scale, num)
       grid(columns: (auto, 1fr), rows: (1fr), align: (left + top, right + top),
         text(size: numfs)[#it.n],
         colprob(it.a, it.b, it.op)))
+  TYP
+end
+
+# 時計盤の作図(clock.typ の内容を組み込んだもの。外部パッケージは使わない)。
+# #clock(hour, minute, size: ..) で 1 つ描く。
+#   hour   : 0-23 の整数(内部で 12 時間表記に変換)
+#   minute : 0-59 の整数
+#   size   : 全体の直径   ink: 線・文字の色(モノクロなので既定は black)
+def typ_clock_face_defs
+  <<~TYP
+
+    // --- 時計盤(モノクロ / 長針・短針)---
+    #let clock(hour, minute, size: 6cm, ink: black) = {
+      let r = size / 2   // 半径
+      let cx = r         // 中心 x
+      let cy = r         // 中心 y
+
+      // 12 時方向を基準に、時計回り ang・中心からの距離 rad の点を返す
+      let pt(ang, rad) = (cx + rad * calc.sin(ang), cy - rad * calc.cos(ang))
+
+      box(width: size, height: size, {
+        // 外周の円
+        let sw = 0.03 * r
+        place(dx: sw / 2, dy: sw / 2, circle(radius: r - sw / 2, stroke: sw + ink))
+
+        // 目盛り(分 = 細・時 = 太)
+        for i in range(60) {
+          let ang = i * 6deg
+          let is-hour = calc.rem(i, 5) == 0
+          let len = if is-hour { 0.12 * r } else { 0.06 * r }
+          let tw  = if is-hour { 0.03 * r } else { 0.015 * r }
+          place(line(start: pt(ang, r - 0.05 * r), end: pt(ang, r - 0.05 * r - len),
+                     stroke: tw + ink))
+        }
+
+        // 数字 1-12
+        let nr = 0.67 * r     // 数字を置く円の半径
+        let cell = 0.32 * r   // 数字用セルの一辺
+        for n in range(1, 13) {
+          let p = pt(n * 30deg, nr)
+          place(dx: p.at(0) - cell / 2, dy: p.at(1) - cell / 2,
+            box(width: cell, height: cell,
+              align(center + horizon,
+                text(font: "#{JP_FONT}", size: 0.20 * r, fill: ink)[#n])))
+        }
+
+        // 針(学習用に、中心から先端までで尾は出さない)
+        let hand(ang, len, tw) = place(line(start: (cx, cy), end: pt(ang, len),
+          stroke: (paint: ink, thickness: tw, cap: "round")))
+        let hm = calc.rem(hour, 12)
+        hand((hm + minute / 60) * 30deg, 0.52 * r, 0.055 * r)  // 短針: 太く短い
+        hand(minute * 6deg, 0.80 * r, 0.035 * r)               // 長針: 細く長い
+
+        // 中心の軸
+        let dot = 0.05 * r
+        place(dx: cx - dot, dy: cy - dot, circle(radius: dot, fill: ink))
+      })
+    }
+  TYP
+end
+
+# 問題(時計・よみ)の定義。1 リージョンに 時計盤(上)と解答欄(下)を置く。
+# 時計盤の直径はリージョンに収まる最大値(上限 clockdiam)を Typst 側で決める
+# (リージョンの大きさは --num と見出しの高さで変わるため)。
+def typ_clock_defs
+  c = CLOCK_LAYOUT
+  <<~TYP
+
+    // --- 寸法(時計・よみ) ---
+    #let clockdiam = #{c[:diam]}mm    // 時計盤の直径(リージョンに入らなければ縮める)
+    #let ansboxh   = #{c[:boxh]}mm    // 解答欄の高さ
+    #let ansboxover = #{c[:boxover]}mm  // 解答欄が時計盤からはみ出す幅(左右それぞれ)
+    #let ansboxr   = #{c[:boxr]}mm     // 解答欄の角丸の半径
+    #let ansboxthk = #{c[:boxthk]}pt   // 解答欄の線の太さ
+    #let clockgap  = #{c[:gap]}mm     // 時計盤と解答欄のあいだの空き
+    #let unitfs    = #{c[:unitfs]}pt   // 「じ」「ふん」の文字サイズ
+    #let unitgap   = #{c[:unitgap]}mm     // 解答欄の下端から「じ」「ふん」の下端までの距離
+    #let fundx     = #{c[:fun_dx]}mm      // 「ふん」の右端を角丸の始まりから右へずらす量
+    #let jidx      = #{c[:ji_dx]}mm      // 「じ」の右端を解答欄の中央から左へずらす量
+    #let rpadx     = #{c[:rpad_x]}mm     // リージョン内の左右の余白
+    #let rpady     = #{c[:rpad_y]}mm     // 同・上下の余白
+    #let numfs     = 12pt   // 問題番号(丸数字)のフォントサイズ
+
+    // 解答欄(角丸四角)。幅は時計盤(直径 d)より左右 ansboxover ずつ広く、高さは h。
+    // 「ふん」は右端が角丸の始まり(右端 - 半径)より fundx 右、「じ」は右端が
+    // 解答欄の中央より jidx 左に来るように置く。
+    // どちらも下端は解答欄の下端から unitgap 上。
+    // showmin が偽のパターン(「ふん」を問わない)は「ふん」を出さず、
+    // 「じ」を「ふん」の位置(角丸の始まり。fundx のずらしはしない)に置く。
+    #let clockans(d, h, showmin) = {
+      let w = d + 2 * ansboxover
+      // 文字の右端の位置。右揃えの箱の幅で表す。
+      let jiw = if showmin { w / 2 - jidx } else { w - ansboxr }
+      box(width: w, height: h, stroke: ansboxthk, radius: ansboxr, {
+        place(bottom + left, dy: -unitgap,
+          box(width: jiw, align(right)[#text(size: unitfs)[じ]]))
+        if showmin {
+          place(bottom + left, dy: -unitgap,
+            box(width: w - ansboxr + fundx, align(right)[#text(size: unitfs)[ふん]]))
+        }
+      })
+    }
+
+    // 1 リージョン(1 問分)。時計盤は上、解答欄は下、どちらも左右中央に置く。
+    // 番号は左上(place なので配置に影響しない。時計盤は丸いので重ならない)。
+    // 大きさは layout でリージョンの実寸を測って決める。時計盤は clockdiam を
+    // 上限にリージョンいっぱいまで大きくし、解答欄の高さは ansboxh を上限に
+    // 時計盤の直径以下に抑える(リージョンが小さいときに解答欄だけが残らないように)。
+    #let region(it) = block(width: 100%, height: 100%, inset: (x: rpadx, y: rpady), {
+      place(top + left, text(size: numfs)[#it.n])
+      layout(sz => {
+        let avail = sz.height - clockgap   // 時計盤と解答欄で分け合う高さ
+        // 解答欄が ansboxh に届かない(= 直径と同じ高さになる)なら avail の半分。
+        let dmax = if avail / 2 <= ansboxh { avail / 2 } else { avail - ansboxh }
+        // 幅は解答欄(直径 + 左右のはみ出し)がリージョンに収まる範囲まで。
+        let d = calc.min(clockdiam, sz.width - 2 * ansboxover, dmax)
+        grid(columns: (100%), rows: (auto, 1fr, auto), align: center,
+          stroke: none, inset: 0pt,
+          clock(it.h, it.m, size: d), [], clockans(d, calc.min(ansboxh, d), it.showmin))
+      })
+    })
+  TYP
+end
+
+# リージョン割り(筆算・時計で共通)。見出し以降の残り領域を num 個のリージョンに
+# 等分割し、1 リージョンに 1 問を置く。1 問の中身は呼び出し側が region で定義する。
+def typ_region_defs(num)
+  rows, cols = REGION_SHAPES[num]
+  <<~TYP
+
+    // リージョンの区切り点線(外周には引かない)
+    #let regionline = (paint: luma(140), thickness: 0.4pt, dash: "dotted")
 
     // 問題本体。#{num} 問 = 縦 #{rows} 個 × 横 #{cols} 列に等分割(番号は行優先)。
     #let regiongrid(items) = grid(
@@ -1201,8 +1442,8 @@ def typ_column_defs(scale, num)
   TYP
 end
 
-# 解答(A4 縦)。暗算・筆算で共通。
-def typ_answer_defs(scale)
+# 解答(A4 縦)。暗算・筆算・時計で共通。
+def typ_answer_defs(scale, form)
   <<~TYP
 
     // 解答 1 問分(番号・答えの 2 セル)。番号は左揃え、答えは右揃え。
@@ -1213,9 +1454,9 @@ def typ_answer_defs(scale)
       align(right)[#text(size: ansfs)[#it.p]],
     )
 
-    // 解答セルの列幅(4 回分を横に並べるため詰めている)。
-    #let ansnumw = 6mm   // 番号(丸数字)の欄幅
-    #let answ    = #{SCALES[scale][:answ] || ANSW_DEFAULT}mm  // 答えの欄幅
+    // 解答セルの列幅(複数の回を横に並べるため詰めている)。
+    #let ansnumw = #{ans_num_width(form)}mm   // 番号(丸数字)の欄幅
+    #let answ    = #{ans_width(scale, form)}mm  // 答えの欄幅
 
     // 解答の 1 列。番号(左揃え)・答え(右揃え)。
     #let ansminicol(items) = table(
@@ -1226,7 +1467,7 @@ def typ_answer_defs(scale)
     #let anspad = 2mm
 
     // 解答 1 ブロック(第N回)。問題と同様に 前半 / 後半 の縦 2 列で表示。
-    // 問題が 1 列レイアウトのときは leftn が全問数になるため、後半の列と
+    // 1 列レイアウトの暗算と時計は leftn が全問数になるため、後半の列と
     // 区切りの点線を出さずに 1 列で表示する。
     // ブロック幅は内容に合わせて縮める(右側の余白を作らない)。
     #let ansblock(title, items, leftn) = block(inset: (x: anspad, y: 6pt), radius: 2pt,
@@ -1246,7 +1487,7 @@ end
 
 # 問題ページ(A4 横。2 回分ずつ)。
 #   暗算(2 列): 前半 ln 問を左、残りを右に並べる。
-#   暗算(1 列)・筆算: 1 回分をそのまま渡す。
+#   暗算(1 列)・筆算・時計: 1 回分をそのまま渡す。
 def typ_problem_pages(sets, num, kind, scale)
   ln = left_count(num, scale)
   probset_args = lambda do |set, n|
@@ -1270,8 +1511,12 @@ def build_typst(sets, num, title_text, stage_name, scale, form, tag)
   kind = prob_kind(form, scale)
   out = +''
   out << typ_preamble(title_text, stage_name, form, tag)
-  out << (form == :column ? typ_column_defs(scale, num) : typ_mental_defs(scale))
-  out << typ_answer_defs(scale)
+  out << case form
+         when :column then typ_column_defs(scale) + typ_region_defs(num)
+         when :clock  then typ_clock_face_defs + typ_clock_defs + typ_region_defs(num)
+         else typ_mental_defs(scale)
+         end
+  out << typ_answer_defs(scale, form)
   out << <<~TYP
 
     // ================= 問題(A4 横) =================
@@ -1285,11 +1530,11 @@ def build_typst(sets, num, title_text, stage_name, scale, form, tag)
     #set page(flipped: false, margin: (x: 10mm, y: 10mm), background: tagans)
     #align(center)[#text(size: 16pt, weight: "bold")[#{title_text}#if stagename != "" [ #stagename] 解答]]
     #v(6pt)
-    #grid(columns: (#{(['1fr'] * ans_cols(scale)).join(', ')}), column-gutter: 3mm,
+    #grid(columns: (#{(['1fr'] * ans_cols(scale, form)).join(', ')}), column-gutter: 3mm,
           row-gutter: #{ans_row_gap(scale)}pt,
   TYP
 
-  ln = left_count(num, scale)
+  ln = ans_left_count(num, scale, form)
   sets.each_with_index do |s, i|
     out << %{  ansblock("第#{i + 1}回", #{typ_answers(s)}, #{ln}),\n}
   end
@@ -1318,12 +1563,13 @@ parser = OptionParser.new do |o|
   o.on('--stage-list', 'ステージ名とサブタイトルの一覧を表示して終了') { options[:stage_list] = true }
   o.on('-n N', '--num N', Integer,
        "1 回あたりの問題数(暗算: #{MIN_PROBLEMS}〜#{MAX_PROBLEMS}, 既定 #{DEFAULT_PROBLEMS} / " \
-       "筆算: #{REGION_SHAPES.keys.join('・')} のいずれか, 既定 #{DEFAULT_REGIONS})") { |v| options[:num] = v }
+       "筆算・時計: #{REGION_SHAPES.keys.join('・')} のいずれか, 既定 #{DEFAULT_REGIONS}・" \
+       "#{DEFAULT_CLOCK_REGIONS})") { |v| options[:num] = v }
   o.on('--pattern P', String, 'パターン名(例: P1-1-1)。複数指定可。--stage を無視。') { |v| options[:patterns] << v }
   o.on('--ratio R', Rational, 'パターンの混合比率(--pattern と同数)。合計 1 に正規化。') { |v| options[:ratios] << v }
   o.on('--scale S', String,
        '文字・解答欄サイズ small/medium/large/onesmall(既定 small)。' \
-       'onesmall は暗算のみの 1 列レイアウト。--stage 指定時は無視。') { |v| options[:scale] = v }
+       'onesmall は暗算のみの 1 列レイアウト。時計では使わない。--stage 指定時は無視。') { |v| options[:scale] = v }
   o.on('-o O', '--output O', String, "出力ファイル名(.pdf)。不正な拡張子なら #{BASENAME}.pdf を使用。") { |v| options[:output] = v }
   o.on('--seed S', Integer, '乱数シード(再現用)') { |v| options[:seed] = v }
   o.on('-h', '--help', 'この使い方を表示') { puts o; exit }
@@ -1378,8 +1624,8 @@ if options[:stage]
     puts "ステージ #{key}(#{stage[:subtitle]}): 九九固定 4 回・1 回 16 問(scale=#{scale}, CLI 指定は無視)。"
   else
     num = stage_num(stage)
-    # 筆算は問題数 = リージョン数。分割できない問題数のステージは定義ミス。
-    if form == :column && !REGION_SHAPES.key?(num)
+    # 筆算・時計は問題数 = リージョン数。分割できない問題数のステージは定義ミス。
+    if form != :mental && !REGION_SHAPES.key?(num)
       abort "内部エラー: ステージ #{key} の問題数(#{num})はリージョンに分割できません" \
             "(#{REGION_SHAPES.keys.join(' / ')})。"
     end
@@ -1387,7 +1633,7 @@ if options[:stage]
 hist = new_history(variety: form == :column)
 sets = Array.new(sets_count) { make_stage_set(stage, hist) }
     puts "ステージ #{key}(#{stage[:subtitle]}): #{pages} ページ・#{sets_count} 回・1 回 #{num} 問" \
-         "(form=#{form}, scale=#{scale})。"
+         "(#{form_desc(form, scale)})。"
   end
 
 elsif !options[:patterns].empty?
@@ -1396,19 +1642,21 @@ elsif !options[:patterns].empty?
   abort "エラー: パターンが存在しません: #{unknown.join(', ')}" unless unknown.empty?
 
   forms = patterns.map { |p| pattern_form(p) }.uniq
-  abort 'エラー: 暗算(P1-x-x)と筆算(P2-x-x)のパターンは同時に指定できません。' if forms.size > 1
+  if forms.size > 1
+    abort 'エラー: 暗算(P1-x-x/P3-x-x)・筆算(P2-x-x)・時計(P4-x-x)のパターンは同時に指定できません。'
+  end
   form = forms.first
 
-  if form == :column
-    # 筆算: 問題数がリージョン分割形を決めるため、分割できる値のみ受け付ける。
-    num = options[:num] || DEFAULT_REGIONS
-    unless REGION_SHAPES.key?(num)
-      abort "エラー: 筆算の問題数は #{REGION_SHAPES.keys.join(' / ')} のいずれかを指定してください(指定: #{num})。"
-    end
-  else
+  if form == :mental
     num = options[:num] || DEFAULT_PROBLEMS
     unless (MIN_PROBLEMS..MAX_PROBLEMS).include?(num)
       abort "エラー: 問題数は #{MIN_PROBLEMS}〜#{MAX_PROBLEMS} の範囲で指定してください(指定: #{num})。"
+    end
+  else
+    # 筆算・時計: 問題数がリージョン分割形を決めるため、分割できる値のみ受け付ける。
+    num = options[:num] || (form == :clock ? DEFAULT_CLOCK_REGIONS : DEFAULT_REGIONS)
+    unless REGION_SHAPES.key?(num)
+      abort "エラー: 筆算・時計の問題数は #{REGION_SHAPES.keys.join(' / ')} のいずれかを指定してください(指定: #{num})。"
     end
   end
 
@@ -1424,13 +1672,16 @@ elsif !options[:patterns].empty?
   end
 
   scale = scale_opt || DEFAULT_SCALE
-  if form == :column && oneline?(scale)
+  if form != :mental && oneline?(scale)
     abort "エラー: --scale #{scale}(1 列レイアウト)は暗算(P1-x-x/P3-x-x)のみで使用できます。"
+  end
+  if form == :clock && scale_opt
+    warn '警告: 時計(P4-x-x)では --scale は使いません(時計盤はリージョンに合わせた大きさになります)。'
   end
 
   hist = new_history(variety: form == :column)
 sets = Array.new(sets_count) { make_pattern_set(patterns, ratios, num, hist) }
-  puts "パターン #{patterns.join(', ')}: #{sets_count} 回・1 回 #{num} 問(form=#{form}, scale=#{scale})。"
+  puts "パターン #{patterns.join(', ')}: #{sets_count} 回・1 回 #{num} 問(#{form_desc(form, scale)})。"
 
 else
   warn 'エラー: --stage または --pattern を指定してください(一覧は --stage-list)。'
@@ -1448,7 +1699,7 @@ pdf_path = if options[:output]&.downcase&.end_with?('.pdf')
 typ_path = pdf_path.sub(/\.pdf\z/i, '.typ')
 
 # 大見出しは出題形式で決まる。
-title_text = form == :column ? '筆算マスター' : '暗算マスター'
+title_text = { column: '筆算マスター', clock: '時計マスター' }.fetch(form, '暗算マスター')
 
 File.write(typ_path, build_typst(sets, num, title_text, stage_name, scale, form, tag))
 puts "Typst ファイルを生成: #{typ_path}"
